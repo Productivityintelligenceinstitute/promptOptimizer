@@ -1,6 +1,8 @@
-import re
+import tiktoken
 
-
-def is_valid_len(prompt: str):
-    cleaned_prompt = re.sub(r'\s+', ' ', prompt.strip())
-    return False if len(cleaned_prompt) > 1000 else True
+def is_valid_len(prompt: str, limit: int = 5000):
+    encoding = tiktoken.get_encoding("o200k_base")
+    token_count = len(encoding.encode(prompt))
+    print(f"Token count: {token_count}")
+    
+    return token_count < limit 

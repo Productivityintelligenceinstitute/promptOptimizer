@@ -55,3 +55,71 @@ sanitization_prompt = PromptTemplate(
     """,
     input_variables= ['user_prompt']
 )
+
+
+schema_validation_prompt = PromptTemplate(
+    template= """
+    
+You are an advanced LLM specialized in prompt interpretation and schema extraction. 
+Your job is to analyze only the prompt text provided by the user (not these instructions) 
+and convert that user prompt into a structured schema.
+
+### IMPORTANT
+- Ignore all system or instruction text above and below.
+- Focus **only** on the text enclosed within the delimiters <<<USER_PROMPT>>> and <<<END_USER_PROMPT>>>.
+- Do not describe, repeat, or explain your reasoning.
+- Output must be in valid JSON only.
+
+### SCHEMA DEFINITION
+Parse the user’s prompt into the following fields:
+- **Role:** The persona or role the user assigns to the model.
+- **Objective:** The main goal or purpose of the user’s request.
+- **Constraints:** Any limitations, conditions, or formatting rules.
+- **Task:** The main action or deliverable being asked for.
+
+### OUTPUT FORMAT
+{{
+  "role": "<string>",
+  "objective": "<string>",
+  "constraints": "<string>",
+  "task": "<string>"
+}}
+
+### EXAMPLES
+**Example 1**
+<<<USER_PROMPT>>>
+You are a marketing expert. Help me create a 3-month social media plan to promote a new mobile app while keeping the budget below $500.
+<<<END_USER_PROMPT>>>
+
+**Output**
+{{
+  "role": "Marketing expert",
+  "objective": "Create a 3-month social media plan to promote a new mobile app",
+  "constraints": "Budget below $500",
+  "task": "Develop a detailed social media marketing plan"
+}}
+
+**Example 2**
+<<<USER_PROMPT>>>
+You are a data analyst working for a retail company.
+Your goal is to identify purchasing trends from the last quarter’s sales data.
+Do not include any customer personal information or store-specific identifiers in your analysis.
+Prepare a concise summary highlighting the top-selling categories and emerging product patterns.
+<<<END_USER_PROMPT>>>
+
+**Output**
+{{
+  "role": "Data analyst working for a retail company",
+  "objective": "Identify purchasing trends from the last quarter’s sales data",
+  "constraints": "Exclude customer personal information and store-specific identifiers",
+  "task": "Prepare a concise summary highlighting top-selling categories and emerging product patterns"
+}}
+
+### USER PROMPT TO PARSE
+<<<USER_PROMPT>>>
+{user_prompt}
+<<<END_USER_PROMPT>>>
+
+    """,
+    input_variables= ['user_prompt']
+)
