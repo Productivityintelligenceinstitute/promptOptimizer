@@ -12,3 +12,10 @@ def get_schema_validation_model():
         api_key= OPENAI_API_KEY,
         model= "gpt-4o-mini"
     )
+
+def get_evaluation_engine_model():
+    return ChatOpenAI(
+        api_key= OPENAI_API_KEY,
+        model= "gpt-4.1",
+    )
+
