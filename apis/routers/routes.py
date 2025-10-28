@@ -36,6 +36,8 @@ async def handle_prompt(prompt: Prompt):
         )
         
     if guard_res["unsafe"]:
+        
+        print(guard_res)
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail="Your prompt was rejected because it contains unsafe, illegal, or sensitive information. Please revise your input and try again. "
@@ -85,6 +87,6 @@ async def handle_prompt(prompt: Prompt):
     )
     
     
-    # return {"validation_res": validation_res, "evaluation_engine_res": evaluation_engine_res}
-    return {"res": guard_res}
+    return {"validation_res": validation_res, "evaluation_engine_res": evaluation_engine_res}
+    # return {"res": guard_res}
 
