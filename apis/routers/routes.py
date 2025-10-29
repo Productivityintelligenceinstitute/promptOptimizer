@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from models.models import Prompt
 from utils.validator import is_valid_len
-from llm.chain_builder import build_guard_chain, build_schema_validation_chain, build_evaluation_engine_chain
+from llm.chain_builder import build_guard_chain, build_basic_prompt_optimization_chain
 
 router = APIRouter()
 
@@ -46,47 +46,15 @@ async def handle_prompt(prompt: Prompt):
     if "PII" in guard_res["issues_detected"]:
         prompt.user_prompt = str(guard_res["redacted_prompt"])
 
-    try:
-        schema_validation_chain = build_schema_validation_chain()
-    except Exception as e:
-        raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Failed to build the processing chain."
-    )
-    
-    try:
-        validation_res = schema_validation_chain.invoke({"user_prompt": prompt.user_prompt})
-    except Exception as e:
-        raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"An error occurred while processing the prompt. {str(e)}"
-    )
-    
-    missing_values = [key for key, value in validation_res.items() if value == ""]
-    
-    print(missing_values)
-    
-    # Perform governance for entered missing values -> This logic will be implemented later
-    # ---- START LOGIC ----
-    # ---- END LOGIC ----
-    
-    try:
-        evaluation_engine_chain = build_evaluation_engine_chain()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to build the processing chain."
-        )
-    
-    try:
-        evaluation_engine_res = evaluation_engine_chain.invoke({"user_prompt": prompt.user_prompt})
-    except Exception as e:
-        raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"An error occurred while processing the prompt. {str(e)}"
-    )
-    
-    
-    return {"validation_res": validation_res, "evaluation_engine_res": evaluation_engine_res}
-    # return {"res": guard_res}
 
+    return {"res": guard_res}
+
+
+@router.post("/basic-prompt")
+async def optimize_basic_prompt(user_prompt: str):
+
+    chain = build_basic_prompt_optimization_chain()
+
+    res = chain.invoke({"user_prompt": user_prompt})
+
+    return {"response": res}
