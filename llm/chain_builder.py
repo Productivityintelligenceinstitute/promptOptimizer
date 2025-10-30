@@ -17,7 +17,22 @@ def build_guard_chain():
 #     parser = JsonOutputParser()
 #     return prompts.evaluation_engine_prompt | schema_validator | parser
 
-def build_basic_prompt_optimization_chain():
+def build_basic_level_optimization_chain():
     optimizer = get_prompt_optimizer_model()
     parser = JsonOutputParser()
     return prompts.basic_level_prompt | optimizer | parser
+
+def build_structured_level_optimization_chain():
+    optimizer = get_prompt_optimizer_model()
+    parser = JsonOutputParser()
+    return prompts.structured_level_prompt | optimizer | parser
+
+def build_mastery_level_optimization_chain():
+    optimizer = get_prompt_optimizer_model()
+    parser = JsonOutputParser()
+    return prompts.master_level_prompt | optimizer | parser
+
+# def build_system_level_optimization_chain():
+#     optimizer = get_prompt_optimizer_model()
+#     parser = JsonOutputParser()
+#     return prompts.system_level_prompt | optimizer | parser
