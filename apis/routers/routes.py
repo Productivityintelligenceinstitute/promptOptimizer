@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from models.models import Prompt
 from utils.validator import is_valid_len
-from llm.chain_builder import build_guard_chain, build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_mastery_level_optimization_chain
+from llm.chain_builder import build_guard_chain, build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_mastery_level_optimization_chain, build_system_level_optimization_chain
 
 router = APIRouter()
 
@@ -91,6 +91,27 @@ async def structured_level_optimization(user_prompt: str):
 async def mastery_level_optimization(user_prompt: str):
     try:
         chain = build_mastery_level_optimization_chain()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to build the optimization chain."
+        )
+    
+    try:
+        res = chain.invoke({"user_prompt": user_prompt})
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred during prompt optimization. {str(e)}"
+        )    
+
+    return {"response": res}
+
+
+@router.post("/system-level-optimization")
+async def system_level_optimization(user_prompt: str):
+    try:
+        chain = build_system_level_optimization_chain()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
