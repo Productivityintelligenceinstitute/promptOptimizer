@@ -30,10 +30,12 @@ def build_structured_level_optimization_chain():
 def build_mastery_level_optimization_chain():
     optimizer = get_prompt_optimizer_model()
     parser = JsonOutputParser()
-    return prompts.master_level_prompt | optimizer | parser
+    # return prompts.master_level_prompt | optimizer | parser
+    return prompts.clarification_template | optimizer | parser
 
 def build_system_level_optimization_chain():
     optimizer = get_prompt_optimizer_model()
     parser = JsonOutputParser()
     return prompts.system_level_prompt | optimizer | parser
     # return prompts.system_level_prompt | optimizer
+
