@@ -1,0 +1,18 @@
+# Virtual environments
+.env
+myenv/
+
+
+requirements.txt
+
+
+config.py
+
+
+__pycache__
+
+apis\routers\__pycache__
+
+constants\__pycache__
+
+llm\__pycache__
