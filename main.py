@@ -12,187 +12,225 @@
     
 #     return {"message": "Welcome to JetPrompt API"}
 
-from langchain_core.output_parsers import JsonOutputParser
-from constants import prompts
+
+
+
+
+# Human in the Loop (HITL) Implementation
+
 from config import OPENAI_API_KEY
-from langchain_openai import ChatOpenAI
-from langchain_core.runnables import RunnablePassthrough, RunnableMap
-import json
+
+from typing import Annotated
+from typing_extensions import TypedDict
+from constants import prompts
 from llm.chain_builder import build_schema_validation_chain, build_evaluation_engine_chain
 
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.tools import tool
+
+from langgraph.prebuilt import ToolNode
+
+from langgraph.types import Command, interrupt
 
 
+
+# initialize the model
 model = ChatOpenAI(
     model_name="gpt-4.1",
     openai_api_key=OPENAI_API_KEY
 )
 
-clarify_chain = prompts.clarification_template | model | JsonOutputParser()
-summary_chain = prompts.summary_prompt | model | JsonOutputParser()
-# # final_chain = prompts.master_level_prompt2 | model | JsonOutputParser()
+class State(TypedDict):
+    user_prompt: str
+    clarification_questions: dict
+    clarification_answers: str
+    summary: dict
+    user_feedback: str
+    final_output: str
+    messages : Annotated[list, add_messages]
+
+# create graph
+graph = StateGraph(State)
+
+def gen_clarification_ques(state: State) -> State:
+    
+    state["user_prompt"] = state["messages"][-1].content
+    
+    clarify_chain = prompts.clarification_template | model | JsonOutputParser()
+    
+    response = clarify_chain.invoke({
+        "user_prompt": state["user_prompt"]})
+    
+    questions = response.get("clarification_questions", [])
+    
+    state["clarification_questions"] = questions
+    
+    questions_text = "\n".join(f"- {question}" for question in questions)
+    
+    state["messages"] = state["messages"] + [
+                                                {
+                                                    "role": "assistant",
+                                                    "content": f"Here are some clarification questions:\n{questions_text}"
+                                                }
+                                            ]
+
+    return state
+
+
+def gen_clarification_response(state: State):
+    
+    user_answers = state["clarification_answers"]
+    
+    print("\n\nUser Answers: \n\n")
+    print(user_answers)
+    
+    summary_chain = prompts.summary_prompt | model | JsonOutputParser()
+    
+    summary_response = summary_chain.invoke({
+        "user_prompt": state["user_prompt"],
+        "user_answers": user_answers
+    })
+    
+    state["summary"] = summary_response
+    
+    state["messages"] = state["messages"] + [
+                                                {
+                                                    "role": "assistant",
+                                                    "content": f"Thank you for your responses. Here is a summary based on your answers:\n{summary_response}"
+                                                }
+                                            ]
+    
+    return state
+
+
+def gen_final_output(state: State):
+    
+    prompt = state["summary"]['updated_prompt']
+    
+    final_chain = prompts.master_level_prompt | model | StrOutputParser()
+    
+    final_response = final_chain.invoke({
+        "user_prompt": prompt
+    })
+    
+    state["final_output"] = final_response
+    
+    state["messages"] = state["messages"] + [
+                                                {
+                                                    "role": "assistant",
+                                                    "content": f"Here is the final optimized prompt:\n{final_response}"
+                                                }
+                                            ]
+    
+    return state
+
+# @tool
+def human_interaction(state: State):
+    # """Simulates human interaction for answering clarification questions"""
+    
+    # human_res = interrupt({'instruction': "Please answer the clarification questions", 'content': state["clarification_questions"]})
+    
+    human_res = interrupt({
+        "instruction": "Please answer the following clarification questions:",
+        "questions": state["clarification_questions"]
+    })
+    
+    return {"clarification_answers": human_res}
+
+def human_feedback(state: State):
+    # """Simulates human interaction for answering clarification questions"""
+    
+    # human_res = interrupt({'instruction': "Please answer the clarification questions", 'content': state["clarification_questions"]})
+    
+    
+    human_res = interrupt({
+        "instruction": "Do you mean this",
+        "questions": state["summary"]['clarified_summary']
+    })
+    
+    return {"feedback": human_res}
+
+# tools = [human_interaction]
+# llm_with_tools = model.bind_tools(tools)
+
+# add nodes
+# graph.add_node("set_user_prompt", set_user_prompt)
+graph.add_node("query_clarification", gen_clarification_ques)
+graph.add_node("human_interaction", human_interaction)
+graph.add_node("clarification_response", gen_clarification_response)
+graph.add_node("human_feedback", human_feedback)
+graph.add_node("final_output", gen_final_output)
+
+# tool_node = ToolNode(tools= tools)
+# graph.add_node("tools", tool_node)
 
 
 
+# add edges
+graph.add_edge(START, "query_clarification")
+graph.add_edge("query_clarification", "human_interaction")
+graph.add_edge("human_interaction", "clarification_response")
+graph.add_edge("clarification_response", "human_feedback")
+graph.add_edge("human_feedback", "final_output")
+graph.add_edge("final_output", END)
 
-response = clarify_chain.invoke({
-    "user_prompt": "I want to learn unity game development"})
+memory = MemorySaver()
+
+workflow = graph.compile(checkpointer=memory)
+
+config = {'configurable': {'thread_id': 1}}
+
+response = workflow.invoke(
+    {'messages': [{"role": "user", "content": "I want to learn unity game development"}]},
+    config   
+)
+
+print("\n\nOutput before interupt: \n\n")
+print(response)
 
 
-# print(response['clarification_questions'])
+human_response = input("Your answer: \n")
 
-# clarification_stage = response["clarification_questions"]
-# questions_list = clarification_stage.get("questions", [])
+human_input = Command(resume= human_response)
 
-for question in response["clarification_questions"]:
-    print(question)
+response = workflow.invoke(human_input, config)
+
+print("\n\nOutput After interupt: \n\n")
+print(response)
 
 
-ans = input("Your answer: \n")
+human_feedback = input("Your answer: \n")
 
-summary_response = summary_chain.invoke({
-    "user_prompt": "I want to learn unity game development",
-    "user_answers": ans
+human_input = Command(resume= human_feedback)
+
+response = workflow.invoke(human_input, config)
+
+print("\n\nOutput After interupt: \n\n")
+print(response)
+
+
+validation_chain = build_schema_validation_chain()
+validation_chain_response = validation_chain.invoke({
+    "user_prompt": response['final_output']
+})
+
+for key, value in validation_chain_response.items():
+    if value in [None, "", []]:
+        raise ValueError(f"Validation failed for {key}")
+
+evaluation_chain = build_evaluation_engine_chain()
+evaluation_chain_response = evaluation_chain.invoke({
+    "user_prompt": response['final_output']
 })
 
 
-print("\n\nSummary Response: \n\n")
-print(summary_response)
-# print(questions_list)
+print("\n\nFinal Response: \n\n")
 
+print(response['final_output'])
+print("\n\n")
+print(evaluation_chain_response)
 
-
-# prompt = "As a beginner in AI, I want to learn LangChain for my exams."
-
-# # chain = prompts.master_level_prompt | model | JsonOutputParser()
-# chain = prompts.master_level_prompt | model
-# response3 = chain.invoke({
-#     "user_prompt": prompt
-# })
-
-# print("\n\nFinal Response: \n\n")
-# print(response3.content)
-
-
-# schema_validation = build_schema_validation_chain()
-# schema_res = schema_validation.invoke({"user_prompt": response3.content})
-
-
-# print("\n\nSchema Validation Response: \n\n")
-# print(schema_res)
-
-
-# schema_res = {'role': '', 'objective': '', 'constraints': ['Beginner-friendly explanations (no prior experience assumed)', 'Step-by-step, clear, and concise instructions', 'Use simple analogies or examples where beneficial', 'Focus on key LangChain components relevant to exams', 'Maintain an encouraging, supportive tone', 'Avoid technical jargon unless explained', 'Respect academic integrity and do not assist in cheating'], 'task': 'introduce LangChain basics, break down essential concepts, provide exam-relevant examples, offer effective exam preparation tips, and suggest additional beginner resources'}
-
-# print(json.dumps(schema_res))
-
-# missing_field = [key for key in schema_res.keys() if schema_res[key] in ("", [], {})]
-
-
-# print(missing_field)
-
-
-
-# evaluation_chain = build_evaluation_engine_chain()
-# evaluation_res = evaluation_chain.invoke({"user_prompt": json.dumps(schema_res)})
-
-# print("\n\nEvaluation Response: \n\n")
-# print(evaluation_res)
-
-
-
-
-# evaluation_result = {
-#     'scores': 
-#         {
-#             'clarity': [
-#                 0.7, 
-#                 'The prompt intent is generally understandable, but the lack of a clear, concise directive or main instruction makes it less immediately clear.'
-#             ],
-#             'completeness': [
-#                 0.6, 
-#                 'While constraints and desired outputs are present, the absence of context or a target audience (e.g., undergraduates, developers) means some critical information is missing.'
-#             ],
-#             'specificity': [
-#                 0.7, 
-#                 'Several specific instructions and constraints are listed, but the lack of explicit formatting or output guidelines leads to possible ambiguity in response structure.'
-#             ], 
-#             'faithfulness': [
-#                 0.9, 
-#                 'The prompt is consistent with its apparent educational and ethical intent, except for some vagueness regarding exam context and acceptable examples.'
-#             ]
-#         },
-#         'issues_found': [
-#             "No explicit instruction or directive summing up what the assistant should do (e.g., 'Write an introductory guide...').", 
-#             'Missing context about the intended audience, learning objectives, or the nature of the exam (subject, format, exam level).',
-#             'List of constraints is comprehensive but could be better organized and linked to defined outputs.',
-#             'Lacks guidance on the format, depth, or length of the response.',
-#             "'Exam-relevant examples' is vague; does not clarify what topics or question styles to target.",
-#             "Faithfulness at risk due to insufficient definition of academic integrity boundaries (e.g., what constitutes 'assisting in cheating')."
-#         ],
-#         'suggestions': [
-#             "Begin with a clear, directive statement outlining the assistant's main task (e.g., 'Write a beginner-friendly guide to LangChain for exam preparation...').", 
-#             'Add context on the intended audience (e.g., undergraduate CS students, exam level).',
-#             "Clarify what 'exam-relevant' means—specify the types of concepts or examples desired (e.g., short-answer, use-case scenarios).", 
-#             'Define the preferred structure and depth of the output (e.g., sections for explanations, example questions, study tips, resources).',
-#             'Explicitly reinforce academic integrity boundaries with a specific instruction about types of assistance to avoid.',
-#             'Consolidate constraints into logically grouped categories for ease of application.'
-#         ],
-#         'exemplar_rewrite':
-#             "Write a beginner-friendly guide introducing the fundamental concepts of LangChain, tailored for students preparing for academic exams (e.g., undergraduate computer science courses). Your response should:\n\n1. Clearly explain key LangChain components relevant to typical exam questions, assuming no prior experience.\n2. Provide step-by-step, concise explanations using simple analogies or examples where helpful.\n3. Include 'exam-relevant' sample questions or scenarios that assess understanding of these basics (focus on conceptual and practical applications, not direct answers).\n4. Offer effective preparation tips and recommend additional beginner-level resources for further study.\n5. Maintain an encouraging, supportive tone. Avoid technical jargon unless it is explained simply.\n6. Uphold academic integrity: do not provide direct solutions to exam questions or facilitate cheating in any way.\n\nStructure your response with clear sections for each of the above points."
-# }
-
-
-
-# print("\n\nEvaluation Result: \n\n")
-# # print(evaluation_result['scores']['clarity'][1])
-# print(evaluation_result['exemplar_rewrite'])
-
-
-
-
-# summarize_response = summarize_chain.invoke({
-#     "clarification_questions_answers": json.dumps({"clarification_qa": qa_dict})})
-
-
-# print(summarize_response)
-
-
-
-# response3 = chain3.invoke({
-#     "user_prompt": "Explain the theory of relativity in simple terms.", 
-#     "clarification_responses": """
-    
-#     The user wants to include an explanation of both the Special and General Theories of Relativity. The information is intended for general educational use, aiming at fulfilling curiosity about physics in non-scientific people.The user is expecting a step-by-step breakdown supported by simple analogies. The content should be friendly, engaging, and slightly informal yet informative. Furthermore, the user prefers a moderate detail level to capture essential concepts without heavy math. The explanation should be written in simple, easy-to-understand language and should not exceed 400 words. A moderately detailed explanation is required. No browsing permissions were stipulated. No corresponding examples were noted. Please confirm if this summary correctly reflects your intent before optimization.
-
-#     """
-# })
-
-# print(response3)
-
-
-# Step 2: Combine them into one pipeline
-# combined_chain = (
-#     {
-#         "user_prompt": RunnablePassthrough()
-#     }
-#     | RunnableMap({
-#         # First, clarification output
-#         "clarification_responses": clarify_chain,
-#         "user_prompt": RunnablePassthrough()
-#     })
-#     | RunnableMap({
-#         # Second, summarization output (takes clarification result)
-#         "clarified_summary": summarize_chain,
-#         "user_prompt": lambda x: x["user_prompt"],
-#         "clarification_responses": lambda x: x["clarification_responses"]
-#     })
-#     | RunnableMap({
-#         # Third, final generation (uses summary + original prompt)
-#         "final_output": final_chain,
-#         "user_prompt": lambda x: x["user_prompt"],
-#         "clarification_responses": lambda x: x["clarified_summary"]
-#     })
-# )
-
-# result = combined_chain.invoke("Explain the theory of relativity in simple terms.")
-# print(result["final_output"])
