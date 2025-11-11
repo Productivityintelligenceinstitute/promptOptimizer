@@ -1,6 +1,6 @@
 # Virtual environments
 .env
-myenv/
+.venv
 
 
 requirements.txt
