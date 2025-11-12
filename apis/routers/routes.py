@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 import utils.utils as utils
-from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain
+from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain, build_schema_validation_chain, build_evaluation_engine_chain
 from workflow.workflow import workflow
 from langgraph.types import Command
 from uuid import uuid4
@@ -74,7 +74,6 @@ async def structured_level_optimization(user_prompt: str):
 
 
 @router.post("/get-clarification-questions")
-# async def mastery_level_optimization(user_prompt: str):    
 async def clarification_questions(user_prompt: str):    
     try:
         guard_res = utils.prompt_input_checks(user_prompt)
@@ -97,45 +96,6 @@ async def clarification_questions(user_prompt: str):
                 "clarification_questions": interrupt_data["clarification_questions"], 
                 "thread_id": config['configurable']['thread_id']
             }
-                # res = workflow.invoke(
-                #     {'messages': [{"role": "user", "content": user_prompt}]},
-                #     config   
-                # )
-                
-                # print("\n\nResponse After interrupt: \n\n")
-                # print(res)
-            
-            # except Exception as e:
-            #     raise HTTPException(
-            #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            #         detail=f"An error occurred during prompt optimization. {str(e)}"
-            #     )
-            
-            # print("\n\n")
-            # user_answers = input("Please provide answers to the clarification questions: \n")
-            
-            # try:
-            #     res = workflow.invoke(Command(resume= user_answers), config)
-                
-            #     print("\n\nOutput After resuming: \n\n")
-            #     print(res)
-            # except Exception as e:
-            #     raise HTTPException(
-            #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            #         detail=f"An error occurred during prompt optimization. {str(e)}"
-            #     )
-            
-            # print("\n\n\n\n")
-            # user_feedback = input("Provide feedback on provided summary of your intent: \n")
-            # try:
-            #     res = workflow.invoke(Command(resume= user_feedback), config)
-            #     print("\n\nOutput After providing user feedback: \n\n")
-            #     print(res)
-            # except Exception as e:
-            #     raise HTTPException(
-            #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            #         detail=f"An error occurred during prompt optimization. {str(e)}"
-            #     )
     
     except Exception as e:
         raise HTTPException(
@@ -192,75 +152,34 @@ async def mastery_level_optimization(user_feedback: str, thread_id: str):
             
             print("\n\nResponse: \n\n")
             print(res)
-    
+        
+        master_level_optimized_prompt = res.get("master_level_optimized_prompt", None)
+        
+        schema_validation = build_schema_validation_chain()
+        schema_res = schema_validation.invoke({"user_prompt": master_level_optimized_prompt})
+        
+        for key, value in schema_res.items():
+            if value in [None, "", []]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Schema Validation Error: {value['error_message']}"
+                )
+        
+        evaluation_engine = build_evaluation_engine_chain()
+        evaluation_res = evaluation_engine.invoke({"user_prompt": master_level_optimized_prompt})
+        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal Server Error.{e}"
         )
     
-    return {"response": res.get("master_level_optimized_prompt", None)}
-
-# @router.post("/mastery-level-optimization")
-# async def mastery_level_optimization(user_prompt: str):    
-#     try:
-#         guard_res = utils.prompt_input_checks(user_prompt)
-        
-#         if not guard_res["res"]["unsafe"]:
-            
-#             thread_id = str(uuid4())
-            
-#             config = {'configurable': {'thread_id': thread_id}}
-            
-#             try:
-#                 res = workflow.invoke(
-#                     {'messages': [{"role": "user", "content": user_prompt}]},
-#                     config   
-#                 )
-                
-#                 print("\n\nResponse After interrupt: \n\n")
-#                 print(res)
-            
-#             except Exception as e:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#                     detail=f"An error occurred during prompt optimization. {str(e)}"
-#                 )
-            
-#             print("\n\n")
-#             user_answers = input("Please provide answers to the clarification questions: \n")
-            
-#             try:
-#                 res = workflow.invoke(Command(resume= user_answers), config)
-                
-#                 print("\n\nOutput After resuming: \n\n")
-#                 print(res)
-#             except Exception as e:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#                     detail=f"An error occurred during prompt optimization. {str(e)}"
-#                 )
-            
-#             print("\n\n\n\n")
-#             user_feedback = input("Provide feedback on provided summary of your intent: \n")
-#             try:
-#                 res = workflow.invoke(Command(resume= user_feedback), config)
-#                 print("\n\nOutput After providing user feedback: \n\n")
-#                 print(res)
-#             except Exception as e:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#                     detail=f"An error occurred during prompt optimization. {str(e)}"
-#                 )
-    
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Internal Server Error."
-#         )
-    
-#     return {"response": res}
-
+    return {"prompt":  schema_res,
+            "scores": evaluation_res["scores"],
+            "issues_found": evaluation_res["issues_found"],
+            "suggestions": evaluation_res["suggestions"],
+            "exemplar_rewrite": evaluation_res["exemplar_rewrite"]
+        }
 
 @router.post("/system-level-optimization")
 async def system_level_optimization(user_prompt: str):
