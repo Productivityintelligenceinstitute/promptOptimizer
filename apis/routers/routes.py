@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 import utils.utils as utils
+from models import models
 from constants import prompts
 from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain
 from workflow.workflow import workflow
@@ -9,9 +10,9 @@ router = APIRouter()
 
 
 @router.post("/basic-level-optimization")
-async def optimize_basic_prompt(user_prompt: str):
+async def optimize_basic_prompt(user_prompt: models.Prompt):
     try:
-        guard_res = utils.prompt_input_checks(user_prompt)
+        guard_res = utils.prompt_input_checks(user_prompt.user_prompt)
         
         if not guard_res["res"]["unsafe"]:
             try:
@@ -23,7 +24,7 @@ async def optimize_basic_prompt(user_prompt: str):
                 )
             
             try:
-                res = chain.invoke({"user_prompt": user_prompt})
+                res = chain.invoke({"user_prompt": user_prompt.user_prompt})
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -40,9 +41,9 @@ async def optimize_basic_prompt(user_prompt: str):
 
 
 @router.post("/structured-level-optimization")
-async def structured_level_optimization(user_prompt: str):
+async def structured_level_optimization(user_prompt: models.Prompt):
     try:
-        guard_res = utils.prompt_input_checks(user_prompt)
+        guard_res = utils.prompt_input_checks(user_prompt.user_prompt)
         
         if not guard_res["res"]["unsafe"]:
             try:
@@ -54,7 +55,7 @@ async def structured_level_optimization(user_prompt: str):
                 )
             
             try:
-                res = chain.invoke({"user_prompt": user_prompt})
+                res = chain.invoke({"user_prompt": user_prompt.user_prompt})
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -71,9 +72,9 @@ async def structured_level_optimization(user_prompt: str):
 
 
 @router.post("/mastery-level-optimization")
-async def mastery_level_optimization(user_input: str):
+async def mastery_level_optimization(user_input: models.Prompt):
     try:
-        guard_res = utils.prompt_input_checks(user_input)
+        guard_res = utils.prompt_input_checks(user_input.user_prompt)
         
         if not guard_res["res"]["unsafe"]:
             
@@ -81,7 +82,7 @@ async def mastery_level_optimization(user_input: str):
             response = workflow.invoke({
                         "messages": [ 
                             {"role": "system", "content": prompts.agent_system_prompt},
-                            {"role": "user", "content": user_input}
+                            {"role": "user", "content": user_input.user_prompt}
                     ]
                 },
                     config= {'configurable': {'thread_id': 1}}
@@ -96,9 +97,9 @@ async def mastery_level_optimization(user_input: str):
     return {"response": response['messages'][-1].content}
 
 @router.post("/system-level-optimization")
-async def system_level_optimization(user_prompt: str):
+async def system_level_optimization(user_prompt: models.Prompt):
     try:
-        guard_res = utils.prompt_input_checks(user_prompt)
+        guard_res = utils.prompt_input_checks(user_prompt.user_prompt)
         
         if not guard_res["res"]["unsafe"]:
             try:
@@ -110,7 +111,7 @@ async def system_level_optimization(user_prompt: str):
                 )
             
             try:
-                res = chain.invoke({"user_prompt": user_prompt})
+                res = chain.invoke({"user_prompt": user_prompt.user_prompt})
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
