@@ -9,7 +9,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 
-from langgraph.checkpoint.memory import MemorySaver
+# from langgraph.checkpoint.memory import MemorySaver
 
 
 model = get_prompt_optimizer_model()
@@ -110,6 +110,6 @@ graph.add_edge(START, "chat_node")
 graph.add_conditional_edges("chat_node", should_continue)
 graph.add_edge("tool_node", "chat_node")
 
-memory = MemorySaver()
+# memory = MemorySaver()
 
-workflow = graph.compile(checkpointer=memory)
+workflow = graph.compile()
