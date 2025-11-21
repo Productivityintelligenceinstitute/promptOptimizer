@@ -538,10 +538,11 @@ agent_system_prompt = """
     - Maintain chat_history continuity.
     - Respect user privacy and safety policies.
     - Do NOT start workflow for NEW_PROMPT until workflow for last NEW_PROMPT is completed. If a new prompt arrives mid-workflow, politely ask user to wait until current session is done.
+    - Always provide final answer as response to user input, do not provide intermediate thoughts.
 
     -----------------------------------------------------
     # LIMITS, QUALITY & EXAMPLES
-    - Max iterations of clarification cycle: 3 (after 3 incomplete cycles, prompt user to simplify request).
+    - Max iterations of clarification cycle: 5 (after 5 incomplete cycles, prompt user to simplify request).
     - Max master_prompt length: 1200 words (recommend 200–500 words for most tasks).
     - Example tool call (Step 1):
     Action: query_clarification

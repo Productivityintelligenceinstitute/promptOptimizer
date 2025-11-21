@@ -42,6 +42,7 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
                 chain = build_basic_level_optimization_chain()
                 
                 user_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="user",
                     content=user_prompt.user_prompt
@@ -68,6 +69,7 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
                     Share message:\n {res['share_message']}"""
                 
                 assistant_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="assistant",
                     content= assistant_res
@@ -119,6 +121,7 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
                 chain = build_structured_level_optimization_chain()
                 
                 user_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="user",
                     content=user_prompt.user_prompt
@@ -147,6 +150,7 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
                     Share message:\n {res['share_message']}"""
                 
                 assistant_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="assistant",
                     content= assistant_res
@@ -174,21 +178,87 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
 
 
 @router.post("/mastery-level-optimization")
-async def mastery_level_optimization(user_input: validator.Prompt):
+async def mastery_level_optimization(user_input: validator.Prompt, db: Session = Depends(database.get_db)):
     try:
+        if not user_input.chat_id:
+            chat_id = str(uuid4())
+            
+            print(chat_id)
+            
+            new_chat = ChatModel(
+                chat_id=chat_id,
+                chat_title=user_input.user_prompt[:50]  # First 50 chars as title
+            )
+            db.add(new_chat)
+            db.commit()
+            db.refresh(new_chat)
+        else:
+            chat_id = user_input.chat_id
+
+        
         guard_res = utils.prompt_input_checks(user_input.user_prompt)
         
         if not guard_res["res"]["unsafe"]:
+            
+            records = (
+                db.query(MessagesModel).filter(MessagesModel.chat_id == chat_id)
+                .order_by(MessagesModel.created_at.asc())
+                .all()
+            )
+            
+            print("\n\nFetched chat history records:\n", records)
+
+            messages = []
+            for record in records:
+                messages.append({
+                    "role": record.role,
+                    "content": record.content
+                })
+            
+            
+            print("\n\nConstructed messages for workflow:\n", messages)
+            
+            user_message = MessagesModel(
+                message_id= str(uuid4()),
+                chat_id=chat_id,
+                role="user",
+                content=user_input.user_prompt
+            )
+            
+            print("Storing user message in DB:", user_message.content)
+            
+            db.add(user_message)
+            db.commit()
+            db.refresh(user_message)
+
+            messages.append({
+                "role": "user",
+                "content": user_input.user_prompt
+            })
             
             # config = {'configurable': {'thread_id': thread_id}}
             response = workflow.invoke({
                         "messages": [ 
                             {"role": "system", "content": prompts.agent_system_prompt},
-                            {"role": "user", "content": user_input.user_prompt}
+                            # {"role": "user", "content": user_input.user_prompt}
+                            *messages
                     ]
                 },
-                    config= {'configurable': {'thread_id': 1}}
+                    # config= {'configurable': {'thread_id': 1}}
             )
+        
+            assistant_message = MessagesModel(
+                message_id= str(uuid4()),
+                chat_id=chat_id,
+                role="assistant",
+                content=response['messages'][-1].content
+            )
+            
+            print("Storing user message in DB:", assistant_message.content)
+            
+            db.add(assistant_message)
+            db.commit()
+            db.refresh(assistant_message)
         
     except Exception as e:
         raise HTTPException(
@@ -196,7 +266,7 @@ async def mastery_level_optimization(user_input: validator.Prompt):
             detail=f"Internal Server Error.{e}"
         )
     
-    return {"response": response['messages'][-1].content}
+    return {"response": response['messages'][-1].content, "chat_id": chat_id}
 
 @router.post("/system-level-optimization")
 async def system_level_optimization(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
@@ -223,6 +293,7 @@ async def system_level_optimization(user_prompt: validator.Prompt, db: Session =
                 chain = build_system_level_optimization_chain()
 
                 user_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="user",
                     content=user_prompt.user_prompt
@@ -250,6 +321,7 @@ async def system_level_optimization(user_prompt: validator.Prompt, db: Session =
                     Compliance Statement:\n {res['compliance_statement']}"""
                 
                 assistant_message = MessagesModel(
+                    message_id= str(uuid4()),
                     chat_id=chat_id,
                     role="assistant",
                     content= assistant_res
