@@ -25,3 +25,10 @@ def get_prompt_optimizer_model():
         model= "gpt-4.1",
         temperature=0.7
     )
+
+def get_chat_title_model():
+    return ChatOpenAI(
+        api_key= OPENAI_API_KEY,
+        model= "gpt-4.1-mini",
+        temperature=0.7
+    )

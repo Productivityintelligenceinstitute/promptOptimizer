@@ -1,6 +1,6 @@
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from constants import prompts
-from llm.llm_models import get_guard_model, get_prompt_optimizer_model, get_schema_validation_model, get_evaluation_engine_model
+from llm.llm_models import get_guard_model, get_prompt_optimizer_model, get_schema_validation_model, get_evaluation_engine_model, get_chat_title_model
 
 def build_guard_chain():
     guard = get_guard_model()
@@ -46,3 +46,8 @@ def build_system_level_optimization_chain():
     optimizer = get_prompt_optimizer_model()
     parser = JsonOutputParser()
     return prompts.system_level_prompt | optimizer | parser
+
+def build_chat_title_generation_chain():
+    chat_title_model = get_chat_title_model()
+    parser = StrOutputParser()
+    return prompts.chat_title_prompt | chat_title_model | parser
