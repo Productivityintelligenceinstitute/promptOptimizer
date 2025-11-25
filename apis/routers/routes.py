@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 import utils.utils as utils
 from validator import validator
 from constants import prompts
-from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain
+from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain, build_chat_title_generation_chain
 from workflow.workflow import workflow
 from database import database
 from sqlalchemy.orm import Session
@@ -25,9 +25,14 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
             
             print(chat_id)
             
+            chat_title_chain = build_chat_title_generation_chain()
+            chat_title = chat_title_chain.invoke({"user_prompt": user_prompt.user_prompt})
+            
+            print("Generated chat title:", chat_title)
+            
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=user_prompt.user_prompt[:50]  # First 50 chars as title
+                chat_title=chat_title
             )
             db.add(new_chat)
             db.commit()
@@ -104,9 +109,14 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
             
             print(chat_id)
             
+            chat_title_chain = build_chat_title_generation_chain()
+            chat_title = chat_title_chain.invoke({"user_prompt": user_prompt.user_prompt})
+            
+            print("Generated chat title:", chat_title)
+            
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=user_prompt.user_prompt[:50]  # First 50 chars as title
+                chat_title=chat_title
             )
             db.add(new_chat)
             db.commit()
@@ -185,9 +195,14 @@ async def mastery_level_optimization(user_input: validator.Prompt, db: Session =
             
             print(chat_id)
             
+            chat_title_chain = build_chat_title_generation_chain()
+            chat_title = chat_title_chain.invoke({"user_prompt": user_input.user_prompt})
+            
+            print("Generated chat title:", chat_title)
+            
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=user_input.user_prompt[:50]  # First 50 chars as title
+                chat_title=chat_title
             )
             db.add(new_chat)
             db.commit()
@@ -201,10 +216,12 @@ async def mastery_level_optimization(user_input: validator.Prompt, db: Session =
         if not guard_res["res"]["unsafe"]:
             
             records = (
-                db.query(MessagesModel).filter(MessagesModel.chat_id == chat_id)
-                .order_by(MessagesModel.created_at.asc())
+                db.query(MessagesModel)
+                .filter(MessagesModel.chat_id == chat_id)
+                .order_by(MessagesModel.created_at.desc())
+                .limit(12)
                 .all()
-            )
+            )[::-1]
             
             print("\n\nFetched chat history records:\n", records)
 
@@ -276,9 +293,14 @@ async def system_level_optimization(user_prompt: validator.Prompt, db: Session =
             
             print(chat_id)
             
+            chat_title_chain = build_chat_title_generation_chain()
+            chat_title = chat_title_chain.invoke({"user_prompt": user_prompt.user_prompt})
+            
+            print("Generated chat title:", chat_title)
+            
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=user_prompt.user_prompt[:50]  # First 50 chars as title
+                chat_title=chat_title
             )
             db.add(new_chat)
             db.commit()

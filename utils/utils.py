@@ -36,7 +36,7 @@ def prompt_input_checks(prompt):
     if guard_res["unsafe"]:
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
-            detail="The provided prompt contains unsafe or prohibited content."
+            detail=f"The provided prompt contains unsafe or prohibited content. {guard_res}"
         )
         
     print("\n\nGuard Response: \n\n")
