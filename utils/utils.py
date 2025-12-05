@@ -1,6 +1,7 @@
 import tiktoken
 from fastapi import HTTPException, status
 from llm.chain_builder import build_guard_chain
+from pwdlib import PasswordHash
 
 def is_valid_len(prompt: str, limit: int = 5000):
     encoding = tiktoken.get_encoding("o200k_base")
@@ -43,3 +44,11 @@ def prompt_input_checks(prompt):
     print(guard_res)
     
     return {"res": guard_res}
+
+password_hash = PasswordHash.recommended()
+
+def verify_password(plain_password, hashed_password):
+    return password_hash.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return password_hash.hash(password)
