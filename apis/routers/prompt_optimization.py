@@ -1,4 +1,3 @@
-from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 import utils.utils as utils
 from validator import validator
@@ -11,13 +10,15 @@ from uuid import uuid4
 from models.chat_model import ChatModel
 from models.messages_model import MessagesModel
 
-router = APIRouter()
+prompt_optimization_router = APIRouter()
 
 
-@router.post("/basic-level-optimization")
+@prompt_optimization_router.post("/basic-level-optimization")
 async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
     
-    print("Received chat_id:", user_prompt.chat_id)
+    print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_prompt.user_id}")
+    
+    user_id = user_prompt.user_id
     
     try:
         if not user_prompt.chat_id:
@@ -32,7 +33,8 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
             
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=chat_title
+                chat_title=chat_title,
+                user_id=user_id
             )
             db.add(new_chat)
             db.commit()
@@ -98,12 +100,15 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
             detail=f"Internal Server Error.{str(e)}"
         )
     
-    return {"response": res, "chat_id": chat_id}
+    return {"user_id": user_id, "response": res, "chat_id": chat_id}
 
 
-@router.post("/structured-level-optimization")
+@prompt_optimization_router.post("/structured-level-optimization")
 async def structured_level_optimization(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
     try:
+        user_id = user_prompt.user_id
+        print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_id}")
+        
         if not user_prompt.chat_id:
             chat_id = str(uuid4())
             
@@ -116,7 +121,8 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
             
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=chat_title
+                chat_title=chat_title,
+                user_id=user_id
             )
             db.add(new_chat)
             db.commit()
@@ -184,12 +190,15 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
             detail="Internal Server Error."
         )
     
-    return {"response": res, "chat_id": chat_id}
+    return {"user_id": user_id, "response": res, "chat_id": chat_id}
 
 
-@router.post("/mastery-level-optimization")
+@prompt_optimization_router.post("/mastery-level-optimization")
 async def mastery_level_optimization(user_input: validator.Prompt, db: Session = Depends(database.get_db)):
     try:
+        user_id = user_input.user_id
+        print(f"Received chat_id, {user_input.chat_id} against user_id, {user_id}")
+        
         if not user_input.chat_id:
             chat_id = str(uuid4())
             
@@ -202,7 +211,8 @@ async def mastery_level_optimization(user_input: validator.Prompt, db: Session =
             
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=chat_title
+                chat_title=chat_title,
+                user_id=user_id
             )
             db.add(new_chat)
             db.commit()
@@ -283,11 +293,14 @@ async def mastery_level_optimization(user_input: validator.Prompt, db: Session =
             detail=f"Internal Server Error.{e}"
         )
     
-    return {"response": response['messages'][-1].content, "chat_id": chat_id}
+    return {"user_id": user_id, "response": response['messages'][-1].content, "chat_id": chat_id}
 
-@router.post("/system-level-optimization")
+@prompt_optimization_router.post("/system-level-optimization")
 async def system_level_optimization(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
     try:
+        user_id = user_prompt.user_id
+        print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_id}")
+        
         if not user_prompt.chat_id:
             chat_id = str(uuid4())
             
@@ -300,7 +313,8 @@ async def system_level_optimization(user_prompt: validator.Prompt, db: Session =
             
             new_chat = ChatModel(
                 chat_id=chat_id,
-                chat_title=chat_title
+                chat_title=chat_title,
+                user_id=user_id
             )
             db.add(new_chat)
             db.commit()
@@ -367,4 +381,4 @@ async def system_level_optimization(user_prompt: validator.Prompt, db: Session =
             detail="Internal Server Error."
         )
     
-    return {"response": res, "chat_id": chat_id}
+    return {"user_id": user_id, "response": res, "chat_id": chat_id}
