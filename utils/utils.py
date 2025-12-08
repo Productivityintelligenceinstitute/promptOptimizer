@@ -2,6 +2,10 @@ import tiktoken
 from fastapi import HTTPException, status
 from llm.chain_builder import build_guard_chain
 from pwdlib import PasswordHash
+from openai import OpenAI
+from pinecone import Pinecone
+from config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME
+from typing import List
 
 def is_valid_len(prompt: str, limit: int = 5000):
     encoding = tiktoken.get_encoding("o200k_base")
@@ -45,6 +49,7 @@ def prompt_input_checks(prompt):
     
     return {"res": guard_res}
 
+
 password_hash = PasswordHash.recommended()
 
 def verify_password(plain_password, hashed_password):
@@ -52,3 +57,47 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return password_hash.hash(password)
+
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index(PINECONE_INDEX_NAME)
+
+EMBED_MODEL = "text-embedding-3-large"
+GEN_MODEL = "gpt-4.1-mini"  # or gpt-4.1
+
+
+def embed(text: str) -> List[float]:
+    resp = client.embeddings.create(
+        model=EMBED_MODEL,
+        input=text
+    )
+    return resp.data[0].embedding
+
+
+def retrieve(query: str, top_k: int = 8):
+    q_emb = embed(query)
+    res = index.query(
+        vector=q_emb,
+        top_k=top_k,
+        include_metadata=True
+    )
+    return res.matches
+
+
+def build_jet_system_prompt(mode: str) -> str:
+    # keep it compact but on-brand
+    return f"""
+        You are Jet, a precision prompt architect and agentic assistant.
+        Use the Jet knowledge base context I provide (prompt engineering, Jet schema, PhD DS blueprint).
+        Follow the 4-D workflow:
+        1) Deconstruct – restate the user's goal and constraints.
+        2) Diagnose – identify missing info, relevant Jet patterns (CoT, few-shot, self-refine, etc.).
+        3) Develop – propose a concrete solution (prompt, plan, or explanation) grounded in the context.
+        4) Deliver – give a concise final answer formatted for a professional user.
+
+        Mode = {mode}. In Quick mode be brief; in Mastery mode be more detailed and analytical.
+
+        Cite retrieved snippets inline as [source:file:jet_layer] when relevant.
+        If something is not supported by the context, say so explicitly instead of guessing.
+    """.strip()
