@@ -2,9 +2,7 @@ import tiktoken
 from fastapi import HTTPException, status
 from llm.chain_builder import build_guard_chain
 from pwdlib import PasswordHash
-from openai import OpenAI
-from pinecone import Pinecone
-from config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME
+from config import client, index, EMBED_MODEL
 from typing import List
 
 def is_valid_len(prompt: str, limit: int = 5000):
@@ -57,14 +55,6 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return password_hash.hash(password)
-
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-pc = Pinecone(api_key=PINECONE_API_KEY)
-index = pc.Index(PINECONE_INDEX_NAME)
-
-EMBED_MODEL = "text-embedding-3-large"
-GEN_MODEL = "gpt-4.1-mini"  # or gpt-4.1
 
 
 def embed(text: str) -> List[float]:

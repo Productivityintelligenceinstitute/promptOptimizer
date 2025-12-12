@@ -1,7 +1,8 @@
 from typing import List
 from fastapi import APIRouter
 from validator.validator import JetRagRequest, JetRagResponse, JetContext
-from utils.utils import retrieve, build_jet_system_prompt, GEN_MODEL, client
+from config import client, GEN_MODEL
+from utils.utils import retrieve, build_jet_system_prompt
 
 
 customer_support_chatbot_router = APIRouter()
