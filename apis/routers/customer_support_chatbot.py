@@ -1,85 +1,11 @@
-# main.py
-import os
-from typing import List, Optional, Dict, Any
-
+from typing import List
 from fastapi import APIRouter
-# from pydantic import BaseModel
-# from dotenv import load_dotenv
-# from langchain_openai import ChatOpenAI
-# from pinecone import Pinecone
-
-# from config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME
 from validator.validator import JetRagRequest, JetRagResponse, JetContext
-from utils.utils import retrieve, build_jet_system_prompt, GEN_MODEL, client
+from config import client, GEN_MODEL
+from utils.utils import retrieve, build_jet_system_prompt
 
-# load_dotenv()
-
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-# PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-
-# client = ChatOpenAI(api_key=OPENAI_API_KEY)
-# pc = Pinecone(api_key=PINECONE_API_KEY)
-# index = pc.Index(PINECONE_INDEX_NAME)
-
-# EMBED_MODEL = "text-embedding-3-large"
-# GEN_MODEL = "gpt-4.1-mini"  # or gpt-4.1
 
 customer_support_chatbot_router = APIRouter()
-
-
-# class JetRagRequest(BaseModel):
-#     query: str
-#     mode: Optional[str] = "Structured"  # Quick | Structured | Mastery
-#     top_k: int = 8
-
-
-# class JetContext(BaseModel):
-#     id: str
-#     score: float
-#     text_preview: str
-#     metadata: Dict[str, Any]
-
-
-# class JetRagResponse(BaseModel):
-#     answer: str
-#     contexts: List[JetContext]
-
-
-# def embed(text: str) -> List[float]:
-#     resp = client.embeddings.create(
-#         model=EMBED_MODEL,
-#         input=text
-#     )
-#     return resp.data[0].embedding
-
-
-# def retrieve(query: str, top_k: int = 8):
-#     q_emb = embed(query)
-#     res = index.query(
-#         vector=q_emb,
-#         top_k=top_k,
-#         include_metadata=True
-#     )
-#     return res.matches
-
-
-# def build_jet_system_prompt(mode: str) -> str:
-#     # keep it compact but on-brand
-#     return f"""
-# You are Jet, a precision prompt architect and agentic assistant.
-# Use the Jet knowledge base context I provide (prompt engineering, Jet schema, PhD DS blueprint).
-# Follow the 4-D workflow:
-# 1) Deconstruct – restate the user's goal and constraints.
-# 2) Diagnose – identify missing info, relevant Jet patterns (CoT, few-shot, self-refine, etc.).
-# 3) Develop – propose a concrete solution (prompt, plan, or explanation) grounded in the context.
-# 4) Deliver – give a concise final answer formatted for a professional user.
-
-# Mode = {mode}. In Quick mode be brief; in Mastery mode be more detailed and analytical.
-
-# Cite retrieved snippets inline as [source:file:jet_layer] when relevant.
-# If something is not supported by the context, say so explicitly instead of guessing.
-# """.strip()
 
 
 @customer_support_chatbot_router.post("/jet/query", response_model=JetRagResponse)
