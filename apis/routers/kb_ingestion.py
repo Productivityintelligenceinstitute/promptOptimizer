@@ -1,11 +1,7 @@
-import os
 import uuid
 from pathlib import Path
-from typing import List, Dict
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-
 from admin.core.reader import read_file
 from admin.core.chunking import chunk_text
 from admin.core.embedding import embed_texts
