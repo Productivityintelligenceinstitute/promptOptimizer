@@ -5,6 +5,7 @@ from database import database
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from models.user_model import UserModel
+from models.subscription_model import SubscriptionsModel
 
 accounts_router = APIRouter()
 
@@ -28,11 +29,23 @@ async def create_account(account: validator.CreateAccount, db: Session = Depends
         db.commit()
         db.refresh(new_user)
         
+        new_subscription = SubscriptionsModel(
+            subscription_id=str(uuid4()),
+            user_id=new_user.user_id,
+            package_id=1,
+            status="active",
+            end_date=None
+        )
+        db.add(new_subscription)
+        db.commit()
+        db.refresh(new_subscription)
+        
         return {"detail": "Account created successfully."}
+    
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create account."
+            detail=f"Failed to create account."
         )
 
 @accounts_router.post("/login-account")
@@ -50,4 +63,25 @@ async def login_account(account: validator.LoginAccount, db: Session = Depends(d
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to login."
+        )
+
+@accounts_router.delete("/delete-account/{user_id}")
+async def delete_account(user_id: str, db: Session = Depends(database.get_db)):
+    try:
+        user = db.query(UserModel).filter(UserModel.user_id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found."
+            )
+        
+        db.delete(user)
+        db.commit()
+        
+        return {"detail": "Account deleted successfully."}
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete account."
         )
