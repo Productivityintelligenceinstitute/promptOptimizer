@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import database
-from validator.validator import Permission
-from models.permission_model import PermissionModel
+from models.models import Permission
+from schemas.permission_model import PermissionModel
 
 permissioons_router = APIRouter()
 

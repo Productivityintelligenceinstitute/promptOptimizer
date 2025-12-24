@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import database
-from validator.validator import Package
-from models.packages_model import PackagesModel
+from models.models import Package
+from schemas.packages_model import PackagesModel
 
 packages_router = APIRouter()
 

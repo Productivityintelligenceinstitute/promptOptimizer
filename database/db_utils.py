@@ -1,6 +1,6 @@
 from datetime import date
 from fastapi import HTTPException, status
-from models.usage_log_model import UsageLogModel
+from schemas.usage_log_model import UsageLogModel
 
 
 def check_daily_usage(db, user_id, permission_id, daily_limit: int):

@@ -1,26 +1,26 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 import utils.utils as utils
-from validator import validator
+from models import models
 from constants import prompts
 from llm.chain_builder import build_basic_level_optimization_chain, build_structured_level_optimization_chain, build_system_level_optimization_chain, build_chat_title_generation_chain
-from workflow.workflow import workflow
+from workflow.master_optimization import workflow
 from database import database
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from uuid import uuid4
-from models.chat_model import ChatModel
-from models.messages_model import MessagesModel
-from models.subscription_model import SubscriptionsModel
-from models.packages_model import PackagesModel
-from models.packages_permission_model import PackagesPermissionModel
-from models.permission_model import PermissionModel
+from schemas.chat_model import ChatModel
+from schemas.messages_model import MessagesModel
+from schemas.subscription_model import SubscriptionsModel
+from schemas.packages_model import PackagesModel
+from schemas.packages_permission_model import PackagesPermissionModel
+from schemas.permission_model import PermissionModel
 from database.db_utils import check_daily_usage, increment_daily_usage
 
 prompt_optimization_router = APIRouter()
 
 
 @prompt_optimization_router.post("/basic-level-optimization")
-async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
+async def optimize_basic_prompt(user_prompt: models.Prompt, db: Session = Depends(database.get_db)):
     try:
         print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_prompt.user_id}")
     
@@ -172,7 +172,7 @@ async def optimize_basic_prompt(user_prompt: validator.Prompt, db: Session = Dep
 
 
 @prompt_optimization_router.post("/structured-level-optimization")
-async def structured_level_optimization(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
+async def structured_level_optimization(user_prompt: models.Prompt, db: Session = Depends(database.get_db)):
     try:
         user_id = user_prompt.user_id
         print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_id}")
@@ -331,7 +331,7 @@ async def structured_level_optimization(user_prompt: validator.Prompt, db: Sessi
 
 
 @prompt_optimization_router.post("/mastery-level-optimization")
-async def mastery_level_optimization(user_input: validator.Prompt, db: Session = Depends(database.get_db)):
+async def mastery_level_optimization(user_input: models.Prompt, db: Session = Depends(database.get_db)):
     try:
         user_id = user_input.user_id
         print(f"Received chat_id, {user_input.chat_id} against user_id, {user_id}")
@@ -494,7 +494,7 @@ async def mastery_level_optimization(user_input: validator.Prompt, db: Session =
     return {"user_id": user_id, "response": response['messages'][-1].content, "chat_id": chat_id}
 
 @prompt_optimization_router.post("/system-level-optimization")
-async def system_level_optimization(user_prompt: validator.Prompt, db: Session = Depends(database.get_db)):
+async def system_level_optimization(user_prompt: models.Prompt, db: Session = Depends(database.get_db)):
     try:
         user_id = user_prompt.user_id
         print(f"Received chat_id, {user_prompt.chat_id} against user_id, {user_id}")

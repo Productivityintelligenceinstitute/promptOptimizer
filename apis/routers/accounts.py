@@ -1,16 +1,16 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 import utils.utils as utils
-from validator import validator
+from models import user_models
 from database import database
 from sqlalchemy.orm import Session
 from uuid import uuid4
-from models.user_model import UserModel
-from models.subscription_model import SubscriptionsModel
+from schemas.user_model import UserModel
+from schemas.subscription_model import SubscriptionsModel
 
 accounts_router = APIRouter()
 
 @accounts_router.post("/create-account")
-async def create_account(account: validator.CreateAccount, db: Session = Depends(database.get_db)):
+async def create_account(account: user_models.CreateAccount, db: Session = Depends(database.get_db)):
     try:
         existing_user = db.query(UserModel).filter(UserModel.email == account.email).first()
         if existing_user:
@@ -49,7 +49,7 @@ async def create_account(account: validator.CreateAccount, db: Session = Depends
         )
 
 @accounts_router.post("/login-account")
-async def login_account(account: validator.LoginAccount, db: Session = Depends(database.get_db)):
+async def login_account(account: user_models.LoginAccount, db: Session = Depends(database.get_db)):
     try:
         user = db.query(UserModel).filter(UserModel.email == account.email).first()
         if not user or not utils.verify_password(account.password, user.password):

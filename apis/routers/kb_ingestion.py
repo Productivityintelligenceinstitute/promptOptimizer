@@ -2,10 +2,10 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from admin.core.reader import read_file
-from admin.core.chunking import chunk_text
-from admin.core.embedding import embed_texts
-from admin.core.metadata import infer_metadata
+from core.reader import read_file
+from core.chunking import chunk_text
+from core.embedding import embed_texts
+from core.metadata import infer_metadata
 from config import KB_DIR, index
 from constants.file_types import PDF_EXT, TEXT_EXTS, DOC_EXTS
 

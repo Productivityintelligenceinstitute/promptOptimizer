@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import database
-from models.packages_permission_model import PackagesPermissionModel
-from models.permission_model import PermissionModel
-from models.subscription_model import SubscriptionsModel
-from models.user_model import UserModel
-from models.messages_model import MessagesModel
-from models.library_model import LibraryModel
+from schemas.packages_permission_model import PackagesPermissionModel
+from schemas.permission_model import PermissionModel
+from schemas.subscription_model import SubscriptionsModel
+from schemas.user_model import UserModel
+from schemas.messages_model import MessagesModel
+from schemas.library_model import LibraryModel
 from uuid import uuid4
 
 library_router = APIRouter()
