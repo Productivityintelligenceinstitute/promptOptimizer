@@ -7,15 +7,6 @@ class Prompt(BaseModel):
     user_prompt: str
     chat_id: Optional[str] = None
 
-class CreateAccount(BaseModel):
-    full_name: str
-    email: str
-    password: str
-
-class LoginAccount(BaseModel):
-    email: str
-    password: str
-
 class MessageOut(BaseModel):
     role: str
     content: Text

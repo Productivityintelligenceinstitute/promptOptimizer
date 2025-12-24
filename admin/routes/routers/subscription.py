@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import database
-from validator.validator import Subscription
-from models.subscription_model import SubscriptionsModel
+from models.models import Subscription
+from schemas.subscription_model import SubscriptionsModel
 from uuid import uuid4
 from datetime import date
 from dateutil import relativedelta

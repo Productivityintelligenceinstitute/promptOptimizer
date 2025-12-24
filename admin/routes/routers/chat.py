@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException, status, Depends
-from validator import validator
+from models import models
 from database import database
 from sqlalchemy.orm import Session
 from fastapi_pagination import Page
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
-from models.chat_model import ChatModel
-from models.messages_model import MessagesModel
+from schemas.chat_model import ChatModel
+from schemas.messages_model import MessagesModel
 
 chat_router = APIRouter()
 
@@ -21,7 +21,7 @@ async def get_chat_list(user_id: str, db: Session = Depends(database.get_db)):
             detail="Failed to fetch chat list."
         )
 
-@chat_router.get("/chat-messages/{chat_id}", response_model= Page[validator.MessageOut])
+@chat_router.get("/chat-messages/{chat_id}", response_model= Page[models.MessageOut])
 async def get_chat_messages(chat_id: str, db: Session = Depends(database.get_db)):
     try:
         # messages = (

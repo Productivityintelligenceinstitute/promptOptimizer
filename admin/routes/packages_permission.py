@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import database
-from validator.validator import PackagePermission
-from models.packages_permission_model import PackagesPermissionModel
+from models.models import PackagePermission
+from schemas.packages_permission_model import PackagesPermissionModel
 
 packages_permission_router = APIRouter()
 

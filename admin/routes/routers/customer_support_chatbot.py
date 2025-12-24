@@ -1,6 +1,6 @@
 from typing import List
 from fastapi import APIRouter
-from validator.validator import JetRagRequest, JetRagResponse, JetContext
+from models.models import JetRagRequest, JetRagResponse, JetContext
 from config import client, GEN_MODEL
 from utils.utils import retrieve, build_jet_system_prompt
 
