@@ -1,0 +1,16 @@
+langchain
+langchain_openai
+langchain_core
+langchain_community
+langgraph
+fastapi[standard]
+requests
+sqlalchemy
+psycopg2
+dotenv
+pwdlib[argon2]
+pypdf
+python-docx
+fastapi-pagination
+pinecone
+firebase-admin
