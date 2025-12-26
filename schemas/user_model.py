@@ -1,5 +1,5 @@
 from database import database
-from sqlalchemy import Column, String, TIMESTAMP, text, Integer
+from sqlalchemy import Column, String, TIMESTAMP, text
 
 class UserModel(database.Base):
     __tablename__ = "users"
@@ -9,3 +9,4 @@ class UserModel(database.Base):
     email = Column(String, nullable=False)
     password = Column(String, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)
+    role = Column(String, nullable=False, default='user')

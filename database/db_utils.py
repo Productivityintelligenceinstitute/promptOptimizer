@@ -1,7 +1,19 @@
 from datetime import date
 from fastapi import HTTPException, status
+from schemas.user_model import UserModel
 from schemas.usage_log_model import UsageLogModel
 
+def check_role(db, user_id):
+    role = (
+        db.query(UserModel)
+        .filter(UserModel.user_id == user_id)
+        .first()
+    )
+    
+    print(role.role)
+    
+    
+    return role.role
 
 def check_daily_usage(db, user_id, permission_id, daily_limit: int):
     today = date.today()

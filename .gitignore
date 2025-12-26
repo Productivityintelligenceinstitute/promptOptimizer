@@ -8,3 +8,5 @@ requirements.txt
 config.py
 
 __pycache__
+
+firebase-service-account.json

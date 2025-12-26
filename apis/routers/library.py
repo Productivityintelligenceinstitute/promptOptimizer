@@ -8,6 +8,7 @@ from schemas.user_model import UserModel
 from schemas.messages_model import MessagesModel
 from schemas.library_model import LibraryModel
 from uuid import uuid4
+from database.db_utils import check_role
 
 library_router = APIRouter()
 
@@ -45,6 +46,33 @@ async def add_to_library(user_id: str, message_id: str, db: Session = Depends(da
 @library_router.get("/get-library")
 async def get_library(user_id: str, db: Session = Depends(database.get_db)):
     try:
+        
+        role = check_role(
+            db= db, 
+            user_id= user_id
+        )
+        
+        if role == "admin":
+            library_entries = (
+                db.query(
+                    UserModel.full_name,
+                    MessagesModel.content
+                )
+                .select_from(LibraryModel)
+                .join(UserModel, LibraryModel.user_id == UserModel.user_id)
+                .join(MessagesModel, LibraryModel.message_id == MessagesModel.message_id)
+                .order_by(LibraryModel.created_at.desc())
+                .all()
+            )
+            
+            results = []
+            for full_name, content in library_entries:
+                results.append({
+                    "full_name": full_name,
+                    "content": content
+                })
+
+            return results
         
         access = (
             db.query(PackagesPermissionModel)

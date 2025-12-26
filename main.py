@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
 from apis.routers.prompt_optimization import prompt_optimization_router
 from apis.routers.accounts import accounts_router
 from apis.routers.subscription import subscription_router
@@ -6,13 +8,24 @@ from apis.routers.chat import chat_router
 from apis.routers.library import library_router
 from apis.routers.customer_support_chatbot import customer_support_chatbot_router
 from apis.routers.kb_ingestion import kb_ingestion_router
+
 from admin.routes.permissions import permissioons_router
 from admin.routes.packages import packages_router
 from admin.routes.packages_permission import packages_permission_router
+from admin.routes.update_role import update_role_router
+
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
 
-app = FastAPI(title="Jet Prompt Optimizer APIs")
+from database.database import create_db_tables
+import schemas
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_tables()
+    yield
+
+app = FastAPI(title="Jet Prompt Optimizer APIs", lifespan=lifespan)
 
 setup_cors(app)
 add_pagination(app)
@@ -27,3 +40,4 @@ app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"])
 app.include_router(permissioons_router, tags=["Admin - Permission Management"])
 app.include_router(packages_router, tags=["Admin - Package Management"])
 app.include_router(packages_permission_router, tags=["Admin - Package Permission Management"])
+app.include_router(update_role_router, tags=["Admin - Update User Role"])
