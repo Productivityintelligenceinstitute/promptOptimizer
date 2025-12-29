@@ -1,0 +1,208 @@
+from fastapi import APIRouter, HTTPException, status, Depends
+import utils.utils as utils
+from models import models
+from llm.chain_builder import build_structured_level_optimization_chain, build_chat_title_generation_chain
+from database import database
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from uuid import uuid4
+from schemas.chat_model import ChatModel
+from schemas.messages_model import MessagesModel
+from schemas.subscription_model import SubscriptionsModel
+from schemas.packages_model import PackagesModel
+from database.db_utils import check_role, check_access, check_daily_usage, increment_daily_usage
+
+structured_level_optimization_router = APIRouter()
+
+@structured_level_optimization_router.post("/structured-level-optimization")
+async def structured_level_optimization(user_prompt: models.Prompt, db: Session = Depends(database.get_db)):
+    try:
+        user_id = user_prompt.user_id
+        
+        role = check_role(
+            db= db, 
+            user_id= user_id
+        )
+        
+        if role == "admin":
+            if not user_prompt.chat_id:
+                chat_id = str(uuid4())
+                chat_title_chain = build_chat_title_generation_chain()
+                chat_title = chat_title_chain.invoke({"user_prompt": user_prompt.user_prompt})
+                
+                new_chat = ChatModel(
+                    chat_id=chat_id,
+                    chat_title=chat_title,
+                    user_id=user_id
+                )
+                db.add(new_chat)
+                db.commit()
+                db.refresh(new_chat)
+            else:
+                chat_id = user_prompt.chat_id
+
+            guard_res = utils.prompt_input_checks(user_prompt.user_prompt)
+            
+            if not guard_res["res"]["unsafe"]:
+                try:
+                    chain = build_structured_level_optimization_chain()
+                    
+                    user_message = MessagesModel(
+                        message_id= str(uuid4()),
+                        chat_id=chat_id,
+                        role="user",
+                        content=user_prompt.user_prompt
+                    )
+                    db.add(user_message)
+                    db.commit()
+                    db.refresh(user_message)
+
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to build the optimization chain.{str(e)}"
+                    )
+                
+                res = chain.invoke({"user_prompt": user_prompt.user_prompt})
+
+                assistant_res = f"""
+                    Optimized Prompt:\n {res['optimized_prompt']}\n\n
+                    Changes made:\n {res['changes_made']} \n\n
+                    Techniques Applied:\n {res['techniques_applied']} \n\n
+                    Pro Tip:\n {res['pro_tip']} \n\n
+                    Share message:\n {res['share_message']}"""
+                
+                assistant_message = MessagesModel(
+                    message_id= str(uuid4()),
+                    chat_id=chat_id,
+                    role="assistant",
+                    content= assistant_res
+                )
+                db.add(assistant_message)
+                db.commit()
+                db.refresh(assistant_message)
+        
+        else:        
+            package = (
+                db.query(PackagesModel)
+                .join(
+                    SubscriptionsModel,
+                    SubscriptionsModel.package_id == PackagesModel.package_id
+                )
+                .filter(
+                    SubscriptionsModel.user_id == user_id,
+                    SubscriptionsModel.status == "active"
+                )
+                .first()
+            )
+            
+            if package.package_name != "free":
+                subscription = (
+                    db.query(SubscriptionsModel)
+                    .filter(
+                        SubscriptionsModel.user_id == user_id,
+                        SubscriptionsModel.status == "active",
+                        SubscriptionsModel.start_date <= text('now()'),
+                        SubscriptionsModel.end_date >= text('now()')
+                    )
+                    .first()
+                )
+                if not subscription:
+                    raise HTTPException(status_code=403, detail="No active subscription")
+            
+            access = check_access(
+                db= db,
+                user_id= user_id,
+                permission_name= "STRUCT_OPT"
+            )
+            
+            if access.is_enabled:
+                check_daily_usage(
+                    db=db,
+                    user_id=user_id,
+                    permission_id=access.permission_id,
+                    daily_limit=access.query_limit
+                )
+                
+                if not user_prompt.chat_id:
+                    chat_id = str(uuid4())
+                    chat_title_chain = build_chat_title_generation_chain()
+                    chat_title = chat_title_chain.invoke({"user_prompt": user_prompt.user_prompt})
+                    
+                    new_chat = ChatModel(
+                        chat_id=chat_id,
+                        chat_title=chat_title,
+                        user_id=user_id
+                    )
+                    db.add(new_chat)
+                    db.commit()
+                    db.refresh(new_chat)
+                else:
+                    chat_id = user_prompt.chat_id
+
+                guard_res = utils.prompt_input_checks(user_prompt.user_prompt)
+                
+                if not guard_res["res"]["unsafe"]:
+                    try:
+                        chain = build_structured_level_optimization_chain()
+                        
+                        user_message = MessagesModel(
+                            message_id= str(uuid4()),
+                            chat_id=chat_id,
+                            role="user",
+                            content=user_prompt.user_prompt
+                        )
+                        db.add(user_message)
+                        db.commit()
+                        db.refresh(user_message)
+
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to build the optimization chain.{str(e)}"
+                        )
+                    
+                    try:
+                        res = chain.invoke({"user_prompt": user_prompt.user_prompt})
+
+                        assistant_res = f"""
+                            Optimized Prompt:\n {res['optimized_prompt']}\n\n
+                            Changes made:\n {res['changes_made']} \n\n
+                            Techniques Applied:\n {res['techniques_applied']} \n\n
+                            Pro Tip:\n {res['pro_tip']} \n\n
+                            Share message:\n {res['share_message']}"""
+                        
+                        assistant_message = MessagesModel(
+                            message_id= str(uuid4()),
+                            chat_id=chat_id,
+                            role="assistant",
+                            content= assistant_res
+                        )
+                        db.add(assistant_message)
+                        db.commit()
+                        db.refresh(assistant_message)
+                        
+                        increment_daily_usage(
+                            db=db,
+                            user_id=user_id,
+                            permission_id=access.permission_id
+                        )
+
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"An error occurred during prompt optimization. {str(e)}"
+                        )    
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User does not have access to Structured Level Optimization."
+                )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error.{str(e)}"
+        )
+    
+    return {"user_id": user_id, "response": res, "chat_id": chat_id}

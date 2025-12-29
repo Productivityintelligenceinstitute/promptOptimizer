@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends
-import utils.utils as utils
 from models import user_models
 from database import database
+from dependencies.auth import verify_firebase_token
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from schemas.user_model import UserModel
@@ -10,52 +10,70 @@ from schemas.subscription_model import SubscriptionsModel
 accounts_router = APIRouter()
 
 @accounts_router.post("/create-account")
-async def create_account(account: user_models.CreateAccount, db: Session = Depends(database.get_db)):
+async def create_account(
+    token: str,
+    # decoded_token=Depends(verify_firebase_token),
+    db: Session = Depends(database.get_db),
+):
     try:
-        existing_user = db.query(UserModel).filter(UserModel.email == account.email).first()
-        if existing_user:
+        
+        decoded_token = verify_firebase_token(token)
+        
+        firebase_uid = decoded_token["uid"]
+        email = decoded_token.get("email")
+
+        if not email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered."
+                detail="Email not available from Firebase token",
             )
-        
-        new_user = UserModel(
-            user_id=str(uuid4()),
-            full_name=account.full_name,
-            email=account.email,
-            password=utils.get_password_hash(account.password)
+
+        user = (
+            db.query(UserModel)
+            .filter(UserModel.firebase_uid == firebase_uid)
+            .first()
         )
-        db.add(new_user)
+
+        if user:
+            return {"detail": "Account already exists"}
+
+        user = UserModel(
+            user_id=str(uuid4()),
+            firebase_uid=firebase_uid,
+            email=email,
+        )
+        db.add(user)
         db.commit()
-        db.refresh(new_user)
-        
-        new_subscription = SubscriptionsModel(
+        db.refresh(user)
+
+        subscription = SubscriptionsModel(
             subscription_id=str(uuid4()),
-            user_id=new_user.user_id,
+            user_id=user.user_id,
             package_id=1,
             status="active",
-            end_date=None
+            end_date=None,
         )
-        db.add(new_subscription)
+        db.add(subscription)
         db.commit()
-        db.refresh(new_subscription)
-        
-        return {"detail": "Account created successfully."}
-    
-    except Exception as e:
+
+        return {"detail": "Account created successfully"}
+
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create account."
+            detail="Failed to create account",
         )
 
 @accounts_router.post("/login-account")
 async def login_account(account: user_models.LoginAccount, db: Session = Depends(database.get_db)):
     try:
         user = db.query(UserModel).filter(UserModel.email == account.email).first()
-        if not user or not utils.verify_password(account.password, user.password):
+        if not user or not user.email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password."
+                detail="Invalid email."
             )
         
         return {"detail": f"Login successful for, {user.full_name} with user id {user.user_id}."}
