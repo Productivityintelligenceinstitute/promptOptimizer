@@ -83,6 +83,8 @@ def seed_permissions(db: Session):
 def seed_packages_permissions(db: Session):
     relations = [
         # FREE
+        (1, 1, 1, True, 5),
+        (2, 1, 2, False, None),
         (3, 1, 3, False, None),
         (4, 1, 4, False, None),
         (5, 1, 5, False, None),
