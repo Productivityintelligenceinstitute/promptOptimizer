@@ -128,7 +128,7 @@ async def mastery_level_optimization(user_input: models.Prompt, db: Session = De
                 permission_name= "MASTER_OPT"
             )
 
-            if access.is_enabled:
+            if access and access.is_enabled:
                 check_daily_usage(
                     db=db,
                     user_id=user_id,

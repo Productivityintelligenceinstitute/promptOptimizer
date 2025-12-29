@@ -116,7 +116,7 @@ async def structured_level_optimization(user_prompt: models.Prompt, db: Session 
                 permission_name= "STRUCT_OPT"
             )
             
-            if access.is_enabled:
+            if access and access.is_enabled:
                 check_daily_usage(
                     db=db,
                     user_id=user_id,

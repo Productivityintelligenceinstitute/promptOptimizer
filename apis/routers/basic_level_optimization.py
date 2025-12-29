@@ -112,7 +112,6 @@ async def optimize_basic_prompt(user_prompt: models.Prompt, db: Session = Depend
                 user_id= user_id,
                 permission_name= "BASIC_OPT"
             )
-            
             if access.is_enabled:
                 check_daily_usage(
                     db=db,
