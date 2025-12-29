@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, status, Depends
-import utils.utils as utils
 from models import user_models
 from database import database
 from dependencies.auth import verify_firebase_token
@@ -12,10 +11,14 @@ accounts_router = APIRouter()
 
 @accounts_router.post("/create-account")
 async def create_account(
-    decoded_token=Depends(verify_firebase_token),
+    token: str,
+    # decoded_token=Depends(verify_firebase_token),
     db: Session = Depends(database.get_db),
 ):
     try:
+        
+        decoded_token = verify_firebase_token(token)
+        
         firebase_uid = decoded_token["uid"]
         email = decoded_token.get("email")
 
@@ -25,7 +28,6 @@ async def create_account(
                 detail="Email not available from Firebase token",
             )
 
-        # Check if user already exists
         user = (
             db.query(UserModel)
             .filter(UserModel.firebase_uid == firebase_uid)
@@ -35,7 +37,6 @@ async def create_account(
         if user:
             return {"detail": "Account already exists"}
 
-        # Create user (NO PASSWORD)
         user = UserModel(
             user_id=str(uuid4()),
             firebase_uid=firebase_uid,
@@ -45,7 +46,6 @@ async def create_account(
         db.commit()
         db.refresh(user)
 
-        # Assign default subscription
         subscription = SubscriptionsModel(
             subscription_id=str(uuid4()),
             user_id=user.user_id,

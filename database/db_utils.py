@@ -1,6 +1,9 @@
 from datetime import date
 from fastapi import HTTPException, status
 from schemas.user_model import UserModel
+from schemas.permission_model import PermissionModel
+from schemas.packages_permission_model import PackagesPermissionModel
+from schemas.subscription_model import SubscriptionsModel
 from schemas.usage_log_model import UsageLogModel
 
 def check_role(db, user_id):
@@ -14,6 +17,27 @@ def check_role(db, user_id):
     
     
     return role.role
+
+def check_access(db, user_id, permission_name):
+    access = (
+        db.query(PackagesPermissionModel)
+        .join(
+            PermissionModel,
+            PermissionModel.permission_id == PackagesPermissionModel.permission_id
+        )
+        .join(
+            SubscriptionsModel, 
+            SubscriptionsModel.package_id == PackagesPermissionModel.package_id
+        ).filter(
+            SubscriptionsModel.user_id == user_id,
+            SubscriptionsModel.status == "active",
+            PermissionModel.permission_name == permission_name
+        )
+        .first()
+    )
+    
+    return access
+
 
 def check_daily_usage(db, user_id, permission_id, daily_limit: int):
     today = date.today()

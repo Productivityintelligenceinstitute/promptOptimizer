@@ -8,7 +8,7 @@ from schemas.user_model import UserModel
 from schemas.messages_model import MessagesModel
 from schemas.library_model import LibraryModel
 from uuid import uuid4
-from database.db_utils import check_role
+from database.db_utils import check_role, check_access
 
 library_router = APIRouter()
 
@@ -55,7 +55,7 @@ async def get_library(user_id: str, db: Session = Depends(database.get_db)):
         if role == "admin":
             library_entries = (
                 db.query(
-                    UserModel.full_name,
+                    UserModel.email,
                     MessagesModel.content
                 )
                 .select_from(LibraryModel)
@@ -66,57 +66,47 @@ async def get_library(user_id: str, db: Session = Depends(database.get_db)):
             )
             
             results = []
-            for full_name, content in library_entries:
+            for email, content in library_entries:
                 results.append({
-                    "full_name": full_name,
+                    "email": email,
                     "content": content
                 })
 
             return results
         
-        access = (
-            db.query(PackagesPermissionModel)
-            .join(
-                PermissionModel,
-                PermissionModel.permission_id == PackagesPermissionModel.permission_id
-            )
-            .join(
-                SubscriptionsModel, 
-                SubscriptionsModel.package_id == PackagesPermissionModel.package_id
-            ).filter(
-                SubscriptionsModel.user_id == user_id,
-                SubscriptionsModel.status == "active",
-                PermissionModel.permission_name == "LIB"
-            )
-            .first()
-        )
-        
-        if access.is_enabled:
-            library_entries = (
-                db.query(
-                    UserModel.full_name,
-                    MessagesModel.content
-                )
-                .select_from(LibraryModel)
-                .join(UserModel, LibraryModel.user_id == UserModel.user_id)
-                .join(MessagesModel, LibraryModel.message_id == MessagesModel.message_id)
-                .order_by(LibraryModel.created_at.desc())
-                .all()
-            )
-            
-            results = []
-            for full_name, content in library_entries:
-                results.append({
-                    "full_name": full_name,
-                    "content": content
-                })
-
-            return results
         else:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User does not have access to the library."
+            access = check_access (
+                db= db,
+                user_id= user_id,
+                permission_name= "LIB"
             )
+            
+            if access:
+                library_entries = (
+                    db.query(
+                        UserModel.email,
+                        MessagesModel.content
+                    )
+                    .select_from(LibraryModel)
+                    .join(UserModel, LibraryModel.user_id == UserModel.user_id)
+                    .join(MessagesModel, LibraryModel.message_id == MessagesModel.message_id)
+                    .order_by(LibraryModel.created_at.desc())
+                    .all()
+                )
+                
+                results = []
+                for email, content in library_entries:
+                    results.append({
+                        "email": email,
+                        "content": content
+                    })
+
+                return results
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User does not have access to the library."
+                )
     
     except Exception as e:
         raise HTTPException(
