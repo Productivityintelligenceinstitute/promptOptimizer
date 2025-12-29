@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from database import SessionLocal
+from database import database
 from schemas.packages_model import PackagesModel
 from schemas.permission_model import PermissionModel
 from schemas.packages_permission_model import PackagesPermissionModel
@@ -125,7 +125,7 @@ def seed_packages_permissions(db: Session):
 
 
 def run_seed():
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         seed_packages(db)
         seed_permissions(db)
