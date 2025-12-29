@@ -1,6 +1,7 @@
 # Virtual environments
 .env
 myenv
+venv
 uploaded_kb
 
 __pycache__

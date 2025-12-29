@@ -7,16 +7,26 @@ from schemas.subscription_model import SubscriptionsModel
 from schemas.usage_log_model import UsageLogModel
 
 def check_role(db, user_id):
-    role = (
+    # Try to find user by user_id first, then by firebase_uid
+    user = (
         db.query(UserModel)
         .filter(UserModel.user_id == user_id)
         .first()
     )
     
-    print(role.role)
+    # If not found by user_id, try firebase_uid (since frontend might pass Firebase UID)
+    if not user:
+        user = (
+            db.query(UserModel)
+            .filter(UserModel.firebase_uid == user_id)
+            .first()
+        )
     
+    if not user:
+        # User not found, return default role
+        return "user"
     
-    return role.role
+    return user.role
 
 def check_access(db, user_id, permission_name):
     access = (

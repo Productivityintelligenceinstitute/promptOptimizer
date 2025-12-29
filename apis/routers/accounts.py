@@ -11,14 +11,11 @@ accounts_router = APIRouter()
 
 @accounts_router.post("/create-account")
 async def create_account(
-    token: str,
-    # decoded_token=Depends(verify_firebase_token),
+    request: user_models.CreateAccount,
+    decoded_token=Depends(verify_firebase_token),
     db: Session = Depends(database.get_db),
 ):
     try:
-        
-        decoded_token = verify_firebase_token(token)
-        
         firebase_uid = decoded_token["uid"]
         email = decoded_token.get("email")
 
@@ -28,6 +25,10 @@ async def create_account(
                 detail="Email not available from Firebase token",
             )
 
+        # Extract full_name once (default to empty string if not provided)
+        full_name = request.full_name or ""
+
+        # Check if user already exists
         user = (
             db.query(UserModel)
             .filter(UserModel.firebase_uid == firebase_uid)
@@ -35,11 +36,18 @@ async def create_account(
         )
 
         if user:
+            # Update full_name if provided and different
+            if full_name and user.full_name != full_name:
+                user.full_name = full_name
+                db.commit()
+                db.refresh(user)
             return {"detail": "Account already exists"}
 
+        # Create new user
         user = UserModel(
             user_id=str(uuid4()),
             firebase_uid=firebase_uid,
+            full_name=full_name,
             email=email,
         )
         db.add(user)
