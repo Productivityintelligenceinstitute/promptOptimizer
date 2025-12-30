@@ -10,6 +10,7 @@ from database import database
 from dependencies.auth import verify_firebase_token
 from schemas.user_model import UserModel
 from schemas.subscription_model import SubscriptionsModel
+from schemas.packages_model import PackagesModel
 
 logger = logging.getLogger(__name__)
 accounts_router = APIRouter()
@@ -204,6 +205,30 @@ async def get_current_user(
                 detail="User data is incomplete"
             )
         
+        # Get active subscription package name
+        package_name: Optional[str] = None
+        try:
+            active_subscription = (
+                db.query(SubscriptionsModel)
+                .filter(
+                    SubscriptionsModel.user_id == user.user_id,
+                    SubscriptionsModel.status == "active"
+                )
+                .first()
+            )
+            
+            if active_subscription:
+                package = (
+                    db.query(PackagesModel)
+                    .filter(PackagesModel.package_id == active_subscription.package_id)
+                    .first()
+                )
+                if package:
+                    package_name = package.package_name
+        except Exception as e:
+            logger.warning(f"Failed to fetch package name for user {user.user_id}: {e}")
+            # Don't fail the request if package lookup fails
+        
         # Format created_at timestamp
         created_at_str: Optional[str] = None
         if user.created_at:
@@ -219,6 +244,7 @@ async def get_current_user(
             role=user.role or "user",  # Default role if not set
             firebase_uid=user.firebase_uid or firebase_uid,
             created_at=created_at_str,
+            package_name=package_name or "free",  # Default to "free" if not found
         )
         
     except HTTPException:
