@@ -7,6 +7,7 @@ from apis.routers.master_level_optimization import master_level_optimization_rou
 from apis.routers.system_level_optimization import system_level_optimization_router
 from apis.routers.accounts import accounts_router
 from apis.routers.subscription import subscription_router
+from apis.routers.stripe import stripe_router
 from apis.routers.chat import chat_router
 from apis.routers.library import library_router
 from apis.routers.customer_support_chatbot import customer_support_chatbot_router
@@ -37,6 +38,7 @@ add_pagination(app)
 app.include_router(customer_support_chatbot_router, tags=["Customer Support Chatbot"])
 app.include_router(accounts_router, tags=["Accounts"])
 app.include_router(subscription_router, tags=["Subscription"])
+app.include_router(stripe_router, prefix="/stripe", tags=["Stripe"])
 app.include_router(basic_level_optimization_router, tags=["Prompt Optimization"])
 app.include_router(structured_level_optimization_router, tags=["Prompt Optimization"])
 app.include_router(master_level_optimization_router, tags=["Prompt Optimization"])

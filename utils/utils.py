@@ -41,9 +41,6 @@ def prompt_input_checks(prompt):
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=f"The provided prompt contains unsafe or prohibited content. {guard_res}"
         )
-        
-    print("\n\nGuard Response: \n\n")
-    print(guard_res)
     
     return {"res": guard_res}
 

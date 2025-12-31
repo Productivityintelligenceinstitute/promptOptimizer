@@ -11,3 +11,4 @@ class UserModel(database.Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)
     role = Column(String, nullable=False, default='user')
     firebase_uid = Column(String, nullable=True)
+    stripe_customer_id = Column(String, nullable=True, unique=True, index=True)

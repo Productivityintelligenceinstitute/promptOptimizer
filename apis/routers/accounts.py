@@ -206,16 +206,33 @@ async def get_current_user(
             )
         
         # Get active subscription package name
+        # Prioritize paid plans over free plan (order by package_id DESC to get highest first)
         package_name: Optional[str] = None
         try:
+            # First, try to get paid subscriptions (package_id > 1)
             active_subscription = (
                 db.query(SubscriptionsModel)
+                .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.package_id)
                 .filter(
                     SubscriptionsModel.user_id == user.user_id,
-                    SubscriptionsModel.status == "active"
+                    SubscriptionsModel.status == "active",
+                    PackagesModel.package_id > 1  # Exclude free plan (package_id = 1)
                 )
+                .order_by(SubscriptionsModel.package_id.desc())  # Get highest package_id first
                 .first()
             )
+            
+            # If no paid subscription, fall back to free plan
+            if not active_subscription:
+                active_subscription = (
+                    db.query(SubscriptionsModel)
+                    .filter(
+                        SubscriptionsModel.user_id == user.user_id,
+                        SubscriptionsModel.status == "active",
+                        SubscriptionsModel.package_id == 1  # Free plan
+                    )
+                    .first()
+                )
             
             if active_subscription:
                 package = (
