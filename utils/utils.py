@@ -2,13 +2,13 @@ import tiktoken
 from fastapi import HTTPException, status
 from llm.chain_builder import build_guard_chain
 from pwdlib import PasswordHash
-from config import client, index, EMBED_MODEL
+from core.config import client, index, EMBED_MODEL
 from typing import List
 
 def is_valid_len(prompt: str, limit: int = 5000):
     encoding = tiktoken.get_encoding("o200k_base")
     token_count = len(encoding.encode(prompt))
-
+    
     return token_count < limit 
 
 
@@ -41,20 +41,8 @@ def prompt_input_checks(prompt):
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail=f"The provided prompt contains unsafe or prohibited content. {guard_res}"
         )
-        
-    print("\n\nGuard Response: \n\n")
-    print(guard_res)
     
     return {"res": guard_res}
-
-
-password_hash = PasswordHash.recommended()
-
-def verify_password(plain_password, hashed_password):
-    return password_hash.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return password_hash.hash(password)
 
 
 def embed(text: str) -> List[float]:

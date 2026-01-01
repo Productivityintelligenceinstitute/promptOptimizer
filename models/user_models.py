@@ -5,6 +5,10 @@ from datetime import datetime
 
 class CreateAccount(BaseModel):
     full_name: Optional[str] = None
+    email : str
+    firebase_uid : str
+# class CreateAccount(BaseModel):
+#     full_name: Optional[str] = None
 
 
 class LoginAccount(BaseModel):

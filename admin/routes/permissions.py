@@ -1,37 +1,23 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+
 from database import database
-from models.models import Permission
-from schemas.permission_model import PermissionModel
+from sqlalchemy.orm import Session
 
-permissioons_router = APIRouter()
+from models.permission_model import CreatePermissionRequest
+from services.permission_service import create_permission, get_all_permissions, delete_permission
 
-@permissioons_router.post("/permissions")
-async def create_permission(permission_name: Permission, db: Session = Depends(database.get_db)):
-    
-    if not db.query(PermissionModel).filter(PermissionModel.permission_name == permission_name.permission_name).first():
-        new_permission = PermissionModel(
-            permission_name=permission_name.permission_name
-        )
-        db.add(new_permission)
-        db.commit()
-        db.refresh(new_permission)
-    
-        return {"permission_name": permission_name, "status": "Permission created"}
-    return {"status": "Permission already exists"}
+permissioons_router = APIRouter(prefix="/permissions")
 
-@permissioons_router.get("/permissions")
-async def get_permissions(db: Session = Depends(database.get_db)):
-    permissions = db.query(PermissionModel).all()
-    return permissions
+@permissioons_router.post("")
+def create(payload: CreatePermissionRequest, db: Session = Depends(database.get_db)):
+    return create_permission(payload.permission_name, db)
 
-@permissioons_router.delete("/permissions/{permission_id}")
-async def delete_permission(permission_id: int, db: Session = Depends(database.get_db)):
-    permission = db.query(PermissionModel).filter(PermissionModel.permission_id == permission_id).first()
-    if not permission:
-        return {"status": "Permission not found"}
-    
-    db.delete(permission)
-    db.commit()
-    
-    return {"status": "Permission deleted"}
+
+@permissioons_router.get("")
+def list_permissions(db: Session = Depends(database.get_db)):
+    return get_all_permissions(db)
+
+
+@permissioons_router.delete("/{permission_id}")
+def remove_permission(permission_name: str, db: Session = Depends(database.get_db)):
+    return delete_permission(permission_name, db)

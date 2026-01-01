@@ -1,5 +1,5 @@
 from langchain_openai import ChatOpenAI
-from config import OPENAI_API_KEY
+from core.config import OPENAI_API_KEY
 
 def get_guard_model():
     return ChatOpenAI(

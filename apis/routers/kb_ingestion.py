@@ -2,11 +2,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from core.reader import read_file
-from core.chunking import chunk_text
-from core.embedding import embed_texts
-from core.metadata import infer_metadata
-from config import KB_DIR, index
+from utils.reader import read_file
+from utils.chunking import chunk_text
+from utils.embedding import embed_texts
+from utils.metadata import infer_metadata
+from core.config import KB_DIR, index
 from constants.file_types import PDF_EXT, TEXT_EXTS, DOC_EXTS
 
 kb_ingestion_router = APIRouter()

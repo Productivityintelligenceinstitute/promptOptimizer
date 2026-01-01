@@ -188,9 +188,7 @@ basic_level_prompt = PromptTemplate(
                     "optimized_prompt": "Your one-paragraph optimized prompt here.",
                     "changes_made": ["<List of security, clarity, or logic improvements>"],
                     "share_message": "
-                        Thanks for using our service!
-                        We’re glad to have you here. If you’d like to share your awesome prompts, add them to our Prompt Library and inspire others.
-                        Explore more tools and ideas on our website: https://yourwebsite.com"
+                        If you’d like to share your awesome prompts, add them to our Prompt Library and inspire others.
                 }}
 
     Formatting Rules:
@@ -244,10 +242,7 @@ structured_level_prompt = PromptTemplate(
                         "Which techniques were applied for optimization (e.g., schema elements, reasoning mode, few-shot examples, etc.)"
                     ],
                     "pro_tip": "A concise expert tip for further refinement or usage of the prompt like best practices, potential pitfalls to avoid, or suggestions for iteration or suitable platform for prompt usage (e.g, Chatgpt, Claude, Gemini etc).",
-                    "share_message": "
-                        Thanks for using our service!
-                        We’re glad to have you here. If you’d like to share your awesome prompts, add them to our Prompt Library and inspire others.
-                        Explore more tools and ideas on our website: https://yourwebsite.com"
+                    "share_message": "If you’d like to share your awesome prompts, add them to our Prompt Library and inspire others."
                 }}
 
     Formatting Rules:
@@ -361,7 +356,7 @@ master_level_prompt = PromptTemplate(
 
     ### **Share Message**
     Thanks for using **Jet (Precision Prompt Architect)**!  
-    Share your optimized prompts at 🌐 [yourwebsite.com](https://yourwebsite.com) to inspire others.
+    Share your optimized prompts in library to inspire others.
 
     ---
 

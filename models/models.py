@@ -29,21 +29,3 @@ class JetContext(BaseModel):
 class JetRagResponse(BaseModel):
     answer: str
     contexts: List[JetContext]
-
-
-class Permission(BaseModel):
-    permission_name: str
-
-class Package(BaseModel):
-    package_name: str
-    is_custom: bool = False
-
-class PackagePermission(BaseModel):
-    package_id: int
-    permission_id: int
-    access: bool
-    query_limit: Optional[int] = None
-
-class Subscription(BaseModel):
-    user_id: str
-    package_id: int

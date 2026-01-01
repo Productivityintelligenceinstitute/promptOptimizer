@@ -22,7 +22,7 @@ from fastapi_pagination import add_pagination
 
 from database.database import create_db_tables
 import schemas
-import firebse.firebase_setup  # Initialize Firebase Admin SDK
+import firebse.firebase_setup
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

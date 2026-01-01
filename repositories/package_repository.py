@@ -1,0 +1,40 @@
+from schemas.packages_model import PackagesModel
+
+
+class PackageRepository:
+
+    @staticmethod
+    def exists(package_name: str, db) -> bool:
+        return (
+            db.query(PackagesModel)
+            .filter(PackagesModel.package_name == package_name)
+            .first()
+            is not None
+        )
+
+    @staticmethod
+    def create(package_name: str, is_custom: bool, db):
+        db.add(
+            PackagesModel(
+                package_name=package_name,
+                is_custom=is_custom
+            )
+        )
+
+    @staticmethod
+    def get_all(db):
+        return db.query(PackagesModel).all()
+
+    @staticmethod
+    def delete(package_name: str, db) -> bool:
+        package = (
+            db.query(PackagesModel)
+            .filter(PackagesModel.package_name == package_name)
+            .first()
+        )
+
+        if not package:
+            return False
+
+        db.delete(package)
+        return True

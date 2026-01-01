@@ -1,28 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+
 from sqlalchemy.orm import Session
 from database import database
-from schemas.user_model import UserModel
+
+from models.update_role_model import UpdateRoleRequestModel
+from services.update_user_role_service import update_user_role_service
 
 update_role_router = APIRouter()
 
 @update_role_router.put("/update-role")
-async def update_user_role(user_id: str, new_role: str, db: Session = Depends(database.get_db)):
-    try:
-        user = db.query(UserModel).filter(UserModel.user_id == user_id).first()
-        if not user:
-            raise HTTPException(
-                status_code=404,
-                detail="User not found."
-            )
-        
-        user.role = new_role
-        db.commit()
-        db.refresh(user)
-        
-        return {"detail": "User role updated successfully."}
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to update user role."
-        )
+async def update_user_role(req_params: UpdateRoleRequestModel, db: Session = Depends(database.get_db)):
+    return update_user_role_service(req_params.email, req_params.new_role, db)

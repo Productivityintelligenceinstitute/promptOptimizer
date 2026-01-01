@@ -1,12 +1,10 @@
 from typing import List
 from fastapi import APIRouter
 from models.models import JetRagRequest, JetRagResponse, JetContext
-from config import client, GEN_MODEL
+from core.config import client, GEN_MODEL
 from utils.utils import retrieve, build_jet_system_prompt
 
-
 customer_support_chatbot_router = APIRouter()
-
 
 @customer_support_chatbot_router.post("/jet/query", response_model=JetRagResponse)
 async def jet_query(body: JetRagRequest):

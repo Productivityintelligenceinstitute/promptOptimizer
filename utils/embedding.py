@@ -1,4 +1,4 @@
-from config import client, EMBED_MODEL
+from core.config import client, EMBED_MODEL
 
 def embed_texts(texts, batch_size=32):
     all_embeddings = []
