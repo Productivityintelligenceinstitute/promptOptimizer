@@ -112,7 +112,7 @@ async def system_level_optimization(user_prompt: models.Prompt, db: Session = De
             access = check_access(
                 db= db,
                 user_id= user_id,
-                permission_name= "SYSTEM_OPT"
+                permission_name= "SYS_OPT"
             )
             
             if access and access.is_enabled:

@@ -38,11 +38,13 @@ def check_access(db, user_id, permission_name):
         .join(
             SubscriptionsModel, 
             SubscriptionsModel.package_id == PackagesPermissionModel.package_id
-        ).filter(
+        )
+        .filter(
             SubscriptionsModel.user_id == user_id,
             SubscriptionsModel.status == "active",
             PermissionModel.permission_name == permission_name
         )
+        .order_by(PackagesPermissionModel.package_id.desc())
         .first()
     )
     
