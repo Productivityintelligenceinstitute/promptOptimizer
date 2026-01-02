@@ -22,5 +22,5 @@ async def get_chat_messages(chat_id: str, db: Session = Depends(database.get_db)
     return get_chat_messages_service(chat_id, db)
 
 @chat_router.delete("/delete-chat/{chat_id}")
-async def delete_chat(input: chat_model.RemoveChat, db: Session = Depends(database.get_db)):
-    return delete_chat_service(input.user_id, input.chat_id, db)
+async def delete_chat(payload: chat_model.RemoveChat, db: Session = Depends(database.get_db)):
+    return delete_chat_service(payload, db)

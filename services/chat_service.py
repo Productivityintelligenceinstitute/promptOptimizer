@@ -5,6 +5,8 @@ from repositories.message_repository import MessageRepository
 
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 
+from core.exceptions.not_found import NotFoundException
+
 def get_chat_list_service(user_id, db: Session):
     chats = ChatRepository.get_chats_by_user(user_id, db)
     
@@ -19,10 +21,10 @@ def get_chat_messages_service(chat_id, db: Session):
     
     return paginated
 
-def delete_chat_service(user_id, chat_id, db: Session):
+def delete_chat_service(payload, db: Session):
     try:
-        ChatRepository.delete_chat(user_id, chat_id, db)
-        return {"detail": "Chat deleted successfully."}
+        ChatRepository.delete_chat(payload.user_id, payload.chat_id, db)
+        raise NotFoundException("Chat not found")
     
     except Exception as e:
         raise Exception("Failed to delete chat.")

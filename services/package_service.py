@@ -1,12 +1,14 @@
 from sqlalchemy.orm import Session
 
 from repositories.package_repository import PackageRepository
+from core.exceptions.conflict import ConflictException
+from core.exceptions.not_found import NotFoundException
 
 
 def create_package(payload, db: Session):
     with db.begin():
         if PackageRepository.exists(payload.package_name, db):
-            return {"status": "Package already exists"}
+            raise ConflictException("Package with this name already exists")
         
         PackageRepository.create(
             db=db,
@@ -30,7 +32,7 @@ def delete_package(package_name: str, db: Session):
     with db.begin():
         deleted = PackageRepository.delete(package_name, db)
         if not deleted:
-            return {"status": "Package not found"}
+            raise NotFoundException("Package not found")
         
         return {
             "status": "success",

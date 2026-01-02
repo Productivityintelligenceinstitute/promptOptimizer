@@ -5,6 +5,7 @@ from database import database
 from schemas.packages_model import PackagesModel
 from schemas.permission_model import PermissionModel
 from schemas.packages_permission_model import PackagesPermissionModel
+from schemas.user_model import UserModel
 
 
 def seed_packages(db: Session):
@@ -103,6 +104,16 @@ def seed_packages_permissions(db: Session):
 
     db.commit()
 
+def seed_default_user(db: Session):
+    default_admin = UserModel(
+        full_name="JPO Admin",
+        role="admin",
+        email="jetpromptoptimizer@gmail.com",
+        firebase_uid="my-firebase-uid"
+    )
+    
+    db.add(default_admin)
+    db.commit()
 
 def run_seed():
     db = database.SessionLocal()

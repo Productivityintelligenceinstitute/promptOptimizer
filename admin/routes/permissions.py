@@ -10,7 +10,7 @@ permissioons_router = APIRouter(prefix="/permissions")
 
 @permissioons_router.post("")
 def create(payload: CreatePermissionRequest, db: Session = Depends(database.get_db)):
-    return create_permission(payload.permission_name, db)
+    return create_permission(payload, db)
 
 
 @permissioons_router.get("")
@@ -18,6 +18,6 @@ def list_permissions(db: Session = Depends(database.get_db)):
     return get_all_permissions(db)
 
 
-@permissioons_router.delete("/{permission_id}")
+@permissioons_router.delete("")
 def remove_permission(permission_name: str, db: Session = Depends(database.get_db)):
     return delete_permission(permission_name, db)

@@ -18,6 +18,6 @@ def list_packages(db: Session = Depends(database.get_db)):
     return get_all_packages(db)
 
 
-@packages_router.delete("/{package_id}")
+@packages_router.delete("")
 def remove_package(package_name: str, db: Session = Depends(database.get_db)):
     return delete_package(package_name, db)

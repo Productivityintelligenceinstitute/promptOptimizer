@@ -22,9 +22,9 @@ async def my_library(user_id: str, db: Session = Depends(database.get_db)):
     return my_library_service(user_id, db)
 
 @library_router.post("/add")
-async def add_to_library(input: library_model.AddToLibraryRequest, db: Session = Depends(database.get_db)):
-    return add_to_library_service(input.user_id, input.message_id, db)
+async def add_to_library(payload: library_model.AddToLibraryRequest, db: Session = Depends(database.get_db)):
+    return add_to_library_service(payload, db)
 
 @library_router.delete("/remove")
-async def remove_from_library(message_id: library_model.RemoveFromLibraryQuery, db: Session = Depends(database.get_db)):
-    return remove_from_library_service(message_id.message_id, db)
+async def remove_from_library(payload: library_model.RemoveFromLibraryQuery, db: Session = Depends(database.get_db)):
+    return remove_from_library_service(payload, db)

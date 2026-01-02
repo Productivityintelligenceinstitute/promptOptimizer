@@ -1,6 +1,7 @@
-from fastapi import HTTPException, status
 from schemas.usage_log_model import UsageLogModel
 from datetime import date
+
+from core.exceptions.rate_limit import RateLimitExceededException
 
 class UsageRepository:
     @staticmethod
@@ -20,10 +21,7 @@ class UsageRepository:
         used = usage.count if usage else 0
 
         if daily_limit is not None and used >= daily_limit:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Daily usage limit exceeded."
-            )
+            raise RateLimitExceededException("Daily usage limit exceeded.")
     
     @staticmethod
     def increment_daily_usage(db, user_id, permission_id):
