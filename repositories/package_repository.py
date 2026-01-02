@@ -2,7 +2,6 @@ from schemas.packages_model import PackagesModel
 
 
 class PackageRepository:
-
     @staticmethod
     def exists(package_name: str, db) -> bool:
         return (
@@ -11,7 +10,7 @@ class PackageRepository:
             .first()
             is not None
         )
-
+    
     @staticmethod
     def create(package_name: str, is_custom: bool, db):
         db.add(
@@ -20,11 +19,19 @@ class PackageRepository:
                 is_custom=is_custom
             )
         )
-
+    
     @staticmethod
     def get_all(db):
         return db.query(PackagesModel).all()
-
+    
+    @staticmethod
+    def get_by_name(package_name: str, db):
+        return (
+            db.query(PackagesModel)
+            .filter(PackagesModel.package_name == package_name)
+            .first()
+        )
+    
     @staticmethod
     def delete(package_name: str, db) -> bool:
         package = (
@@ -32,9 +39,9 @@ class PackageRepository:
             .filter(PackagesModel.package_name == package_name)
             .first()
         )
-
+        
         if not package:
             return False
-
+        
         db.delete(package)
         return True

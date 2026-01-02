@@ -16,6 +16,7 @@ from admin.routes.permissions import permissioons_router
 from admin.routes.packages import packages_router
 from admin.routes.packages_permission import packages_permission_router
 from admin.routes.update_role import update_role_router
+from admin.routes.assign_package import assign_package_router
 
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
@@ -48,3 +49,4 @@ app.include_router(permissioons_router, tags=["Admin - Permission Management"])
 app.include_router(packages_router, tags=["Admin - Package Management"])
 app.include_router(packages_permission_router, tags=["Admin - Package Permission Management"])
 app.include_router(update_role_router, tags=["Admin - Update User Role"])
+app.include_router(assign_package_router, tags=["Admin - Assign Package"])

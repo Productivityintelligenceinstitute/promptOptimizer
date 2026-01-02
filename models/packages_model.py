@@ -12,3 +12,7 @@ class PackageOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class AssignPackage(BaseModel):
+    user_email: str
+    package_name: str
