@@ -18,4 +18,4 @@ KB_DIR = Path("uploaded_kb")
 KB_DIR.mkdir(exist_ok=True)
 
 EMBED_MODEL = "text-embedding-3-large"
-GEN_MODEL = "gpt-4.1-mini"  # or gpt-4.1
+GEN_MODEL = "gpt-4.1-mini"
