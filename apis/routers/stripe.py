@@ -23,7 +23,7 @@ from dependencies.auth import verify_firebase_token
 from schemas.user_model import UserModel
 from schemas.subscription_model import SubscriptionsModel
 from schemas.packages_model import PackagesModel
-from config import (
+from core.config import (
     STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET,
     STRIPE_PRICE_ID_ESSENTIAL,
