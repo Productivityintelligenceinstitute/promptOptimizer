@@ -102,7 +102,7 @@ async def create_account(
             db.add(new_user)
             db.flush()  # Flush to get user_id before creating subscription
 
-            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").scalar()
+            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").first().id
             
             # Create default subscription
             subscription = SubscriptionsModel(
@@ -211,7 +211,7 @@ async def get_current_user(
         try:
             # First, try to get paid subscriptions (package_id > 1)
             
-            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").scalar()
+            package_id = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first().id
             
             active_subscription = (
                 db.query(SubscriptionsModel)
@@ -292,7 +292,7 @@ async def login_account(account: user_models.LoginAccount, db: Session = Depends
                 detail="Invalid email."
             )
         
-        return {"detail": f"Login successful for, {user.full_name} with user id {user.user_id}."}
+        return {"detail": f"Login successful for, {user.full_name} with user id {user.id}."}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
