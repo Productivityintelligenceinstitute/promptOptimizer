@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from repositories.chat_repository import ChatRepository
@@ -27,4 +28,4 @@ def delete_chat_service(payload, db: Session):
         raise NotFoundException("Chat not found")
     
     except Exception as e:
-        raise Exception("Failed to delete chat.")
+        raise HTTPException(detail=str(e), status_code=500)

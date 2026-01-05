@@ -15,7 +15,7 @@ def validate_access(db, user_id, permission):
     
     access = AccessRepository.check_access(db, user_id, permission)
     if not access or not access.is_enabled:
-        raise AccessDeniedException("Access denied for basic optimization feature")
+        raise AccessDeniedException("Access denied for optimization feature")
     
     UsageRepository.check_daily_usage(
         db, user_id, access.permission_id, access.query_limit
