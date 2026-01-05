@@ -219,7 +219,7 @@ async def get_current_user(
                 .filter(
                     SubscriptionsModel.user_id == user.id,
                     SubscriptionsModel.status == "active",
-                    PackagesModel.id != package_id  # Exclude free plan (package_id = 1)
+                    PackagesModel.id != package_id  # Exclude free plan 
                 )
                 .first()
             )
@@ -231,7 +231,7 @@ async def get_current_user(
                     .filter(
                         SubscriptionsModel.user_id == user.id,
                         SubscriptionsModel.status == "active",
-                        SubscriptionsModel.package_id == 1  # Free plan
+                        SubscriptionsModel.package_id == package_id  # Free plan
                     )
                     .first()
                 )
