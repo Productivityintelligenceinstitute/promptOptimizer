@@ -14,6 +14,12 @@ class SubscriptionsModel(database.Base):
     start_date = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
     end_date = Column(TIMESTAMP(timezone=True), nullable=True)
     auto_renew = Column(Boolean, default=True)
+    
+    # Stripe-related fields
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True, unique=True, index=True)
+    stripe_price_id = Column(String, nullable=True)
+    
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'))
     __table_args__ = (

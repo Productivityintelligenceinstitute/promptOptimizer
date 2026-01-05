@@ -12,6 +12,7 @@ class UserModel(database.Base):
     role = Column(String, nullable=False, default='user')
     email = Column(String, nullable=False)
     firebase_uid = Column(String, nullable=True)
+    stripe_customer_id = Column(String, nullable=True, unique=True, index=True)
     created_at = Column(TIMESTAMP(timezone=True),server_default=text('now()'), nullable=False)
     chats = relationship("ChatModel", back_populates="users", cascade="all, delete-orphan")
     subscriptions = relationship("SubscriptionsModel",back_populates="users",cascade="all, delete-orphan")
