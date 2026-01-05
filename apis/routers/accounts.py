@@ -94,7 +94,6 @@ async def create_account(
         # Create new user
         try:
             new_user = UserModel(
-                user_id=str(uuid4()),
                 firebase_uid=firebase_uid,
                 full_name=full_name,
                 email=email,
@@ -103,11 +102,12 @@ async def create_account(
             db.add(new_user)
             db.flush()  # Flush to get user_id before creating subscription
 
+            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").scalar()
+            
             # Create default subscription
             subscription = SubscriptionsModel(
-                subscription_id=str(uuid4()),
-                user_id=new_user.user_id,
-                package_id=1,  # Default free package
+                user_id=new_user.id,
+                package_id=package_id,  # Default free package
                 status="active",
                 end_date=None,
             )
@@ -115,7 +115,7 @@ async def create_account(
             db.commit()
             db.refresh(new_user)
 
-            logger.info(f"Created new user account: {new_user.user_id} for firebase_uid: {firebase_uid}")
+            logger.info(f"Created new user account: {new_user.id} for firebase_uid: {firebase_uid}")
             return {"detail": "Account created successfully"}
 
         except SQLAlchemyError as e:
@@ -198,8 +198,8 @@ async def get_current_user(
             )
         
         # Validate required fields
-        if not user.user_id or not user.email:
-            logger.error(f"User {user.user_id} has missing required fields")
+        if not user.id or not user.email:
+            logger.error(f"User {user.id} has missing required fields")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="User data is incomplete"
@@ -210,15 +210,17 @@ async def get_current_user(
         package_name: Optional[str] = None
         try:
             # First, try to get paid subscriptions (package_id > 1)
+            
+            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").scalar()
+            
             active_subscription = (
                 db.query(SubscriptionsModel)
-                .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.package_id)
+                .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
                 .filter(
-                    SubscriptionsModel.user_id == user.user_id,
+                    SubscriptionsModel.user_id == user.id,
                     SubscriptionsModel.status == "active",
-                    PackagesModel.package_id > 1  # Exclude free plan (package_id = 1)
+                    PackagesModel.id != package_id  # Exclude free plan (package_id = 1)
                 )
-                .order_by(SubscriptionsModel.package_id.desc())  # Get highest package_id first
                 .first()
             )
             
@@ -227,7 +229,7 @@ async def get_current_user(
                 active_subscription = (
                     db.query(SubscriptionsModel)
                     .filter(
-                        SubscriptionsModel.user_id == user.user_id,
+                        SubscriptionsModel.user_id == user.id,
                         SubscriptionsModel.status == "active",
                         SubscriptionsModel.package_id == 1  # Free plan
                     )
@@ -237,13 +239,13 @@ async def get_current_user(
             if active_subscription:
                 package = (
                     db.query(PackagesModel)
-                    .filter(PackagesModel.package_id == active_subscription.package_id)
+                    .filter(PackagesModel.id == active_subscription.package_id)
                     .first()
                 )
                 if package:
                     package_name = package.package_name
         except Exception as e:
-            logger.warning(f"Failed to fetch package name for user {user.user_id}: {e}")
+            logger.warning(f"Failed to fetch package name for user {user.id}: {e}")
             # Don't fail the request if package lookup fails
         
         # Format created_at timestamp
@@ -252,10 +254,10 @@ async def get_current_user(
             try:
                 created_at_str = user.created_at.isoformat()
             except (AttributeError, ValueError) as e:
-                logger.warning(f"Failed to format created_at for user {user.user_id}: {e}")
+                logger.warning(f"Failed to format created_at for user {user.id}: {e}")
         
         return user_models.UserResponse(
-            user_id=user.user_id,
+            user_id=user.id,
             email=user.email,
             full_name=user.full_name,
             role=user.role or "user",  # Default role if not set
@@ -300,7 +302,7 @@ async def login_account(account: user_models.LoginAccount, db: Session = Depends
 @accounts_router.delete("/delete-account/{user_id}")
 async def delete_account(user_id: str, db: Session = Depends(database.get_db)):
     try:
-        user = db.query(UserModel).filter(UserModel.user_id == user_id).first()
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
