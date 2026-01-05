@@ -23,10 +23,10 @@ class PermissionRepository:
         return db.query(PermissionModel).all()
 
     @staticmethod
-    def delete(permission_name: str, db) -> bool:
+    def delete(permission_id: int, db) -> bool:
         permission = (
             db.query(PermissionModel)
-            .filter(PermissionModel.permission_name == permission_name)
+            .filter(PermissionModel.id == permission_id)
             .first()
         )
         

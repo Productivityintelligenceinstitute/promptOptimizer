@@ -24,9 +24,9 @@ def get_all_permissions(db: Session):
     }
 
 
-def delete_permission(permission_name: str, db: Session):
+def delete_permission(permission_id: int, db: Session):
     with db.begin():
-        deleted = PermissionRepository.delete(permission_name, db)
+        deleted = PermissionRepository.delete(permission_id, db)
         if not deleted:
             raise NotFoundException("Permission not found")
             

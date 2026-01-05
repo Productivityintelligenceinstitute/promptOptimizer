@@ -13,7 +13,7 @@ from llm.chains.structured_optimization_chain import structured_optimization_cha
 from utils.guardrails import validate_prompt
 from utils.response_formatter import format_structure_opt_response
 
-async def optimize_prompt_service(payload, db: Session):
+async def structured_level_optimization_service(payload, db: Session):
     user_id = payload.user_id
     
     validate_access(db, user_id, "STRUCT_OPT")

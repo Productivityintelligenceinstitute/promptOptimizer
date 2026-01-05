@@ -28,9 +28,9 @@ def get_all_packages(db: Session):
     }
 
 
-def delete_package(package_name: str, db: Session):
+def delete_package(package_id: int, db: Session):
     with db.begin():
-        deleted = PackageRepository.delete(package_name, db)
+        deleted = PackageRepository.delete(package_id, db)
         if not deleted:
             raise NotFoundException("Package not found")
         

@@ -24,9 +24,9 @@ def get_all_package_permissions(db: Session):
     }
 
 
-def delete_package_permission(package_name: str, permission_name: str, db: Session):
+def delete_package_permission(package_id: int, permission_id: int, db: Session):
     with db.begin():
-        deleted = PackagePermissionRepository.delete(package_name, permission_name, db)
+        deleted = PackagePermissionRepository.delete(package_id, permission_id, db)
         
         if not deleted:
             raise NotFoundException("Package-Permission mapping not found")

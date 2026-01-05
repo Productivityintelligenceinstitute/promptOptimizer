@@ -33,10 +33,10 @@ class PackageRepository:
         )
     
     @staticmethod
-    def delete(package_name: str, db) -> bool:
+    def delete(package_id: int, db) -> bool:
         package = (
             db.query(PackagesModel)
-            .filter(PackagesModel.package_name == package_name)
+            .filter(PackagesModel.id == package_id)
             .first()
         )
         

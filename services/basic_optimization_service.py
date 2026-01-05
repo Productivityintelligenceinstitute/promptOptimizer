@@ -12,7 +12,7 @@ from core.exceptions.llm import LLMServiceException
 from utils.guardrails import validate_prompt
 from utils.response_formatter import format_basic_opt_response
 
-async def optimize_prompt_service(payload, db: Session):
+async def optimize_basic_prompt_service(payload, db: Session):
     user_id = payload.user_id
     
     validate_access(db, user_id, "BASIC_OPT")

@@ -25,6 +25,6 @@ async def my_library(user_id: str, db: Session = Depends(database.get_db)):
 async def add_to_library(payload: library_model.AddToLibraryRequest, db: Session = Depends(database.get_db)):
     return add_to_library_service(payload, db)
 
-@library_router.delete("/remove")
-async def remove_from_library(payload: library_model.RemoveFromLibraryQuery, db: Session = Depends(database.get_db)):
-    return remove_from_library_service(payload, db)
+@library_router.delete("/remove/{message_id}")
+async def remove_from_library(message_id: str, db: Session = Depends(database.get_db)):
+    return remove_from_library_service(message_id, db)

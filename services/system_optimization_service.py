@@ -12,7 +12,7 @@ from core.exceptions.llm import LLMServiceException
 from utils.guardrails import validate_prompt
 from utils.response_formatter import format_system_opt_response
 
-async def optimize_prompt_service(payload, db: Session):
+async def system_level_optimization_service(payload, db: Session):
     user_id = payload.user_id
     
     validate_access(db, user_id, "SYS_OPT")

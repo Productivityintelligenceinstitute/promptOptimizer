@@ -50,16 +50,7 @@ class PackagePermissionRepository:
         return db.query(PackagesPermissionModel).all()
 
     @staticmethod
-    def delete(package_name: str, permission_name: str, db) -> bool:
-        
-        package_id = db.query(PackagesModel.id).filter(
-            PackagesModel.package_name == package_name
-        ).scalar()
-        
-        permission_id = db.query(PermissionModel.id).filter(
-            PermissionModel.permission_name == permission_name
-        ).scalar()
-        
+    def delete(package_id: int, permission_id: int, db) -> bool:
         entry = (
             db.query(PackagesPermissionModel)
             .filter(
@@ -68,9 +59,9 @@ class PackagePermissionRepository:
             )
             .first()
         )
-
+        
         if not entry:
             return False
-
+        
         db.delete(entry)
         return True

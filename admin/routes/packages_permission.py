@@ -14,11 +14,11 @@ def list_all(db: Session = Depends(database.get_db)):
     return get_all_package_permissions(db)
 
 
-@packages_permission_router.post("")
+@packages_permission_router.post("/add")
 def assign(payload: AssignPermissionRequest, db: Session = Depends(database.get_db)):
     return assign_permission(payload, db)
 
 
-@packages_permission_router.delete("")
-def remove(package_name: str, permission_name: str, db: Session = Depends(database.get_db)):
-    return delete_package_permission(package_name, permission_name, db)
+@packages_permission_router.delete("/remove/{package_id}/{permission_id}")
+def remove(package_id: int, permission_id: int, db: Session = Depends(database.get_db)):
+    return delete_package_permission(package_id, permission_id, db)

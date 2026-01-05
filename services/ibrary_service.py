@@ -28,8 +28,8 @@ def add_to_library_service(payload, db: Session):
     LibraryRepository.add(payload.user_id, payload.message_id, db)
     return {"status": "Message added to library successfully"}
 
-def remove_from_library_service(payload, db: Session):
-    if not LibraryRepository.delete(db, payload.message_id):
+def remove_from_library_service(message_id, db: Session):
+    if not LibraryRepository.delete(db, message_id):
         raise NotFoundException("Message not found in library")
     
     return {"detail": "Message removed from library successfully"}

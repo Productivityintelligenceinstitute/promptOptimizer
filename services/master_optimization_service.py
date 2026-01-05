@@ -14,7 +14,7 @@ from constants.prompts import agent_system_prompt
 
 from utils.guardrails import validate_prompt
 
-async def optimize_prompt_service(payload, db: Session):
+async def master_level_optimization_service(payload, db: Session):
     user_id = payload.user_id
     
     validate_access(db, user_id, "MASTER_OPT")
