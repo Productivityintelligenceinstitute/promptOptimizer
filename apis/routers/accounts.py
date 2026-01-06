@@ -206,44 +206,65 @@ async def get_current_user(
             )
         
         # Get active subscription package name
-        # Prioritize paid plans over free plan (order by package_id DESC to get highest first)
+        # Prioritize paid plans over free plan
         package_name: Optional[str] = None
         try:
-            # First, try to get paid subscriptions (package_id > 1)
-            
-            package_id = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first().id
-            
-            active_subscription = (
-                db.query(SubscriptionsModel)
-                .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
-                .filter(
-                    SubscriptionsModel.user_id == user.id,
-                    SubscriptionsModel.status == "active",
-                    PackagesModel.id != package_id  # Exclude free plan 
+            # Get free package to exclude it from paid subscriptions
+            free_package = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first()
+            if free_package:
+                free_package_id = free_package.id
+                
+                # First, try to get paid subscriptions (exclude free plan)
+                active_subscription = (
+                    db.query(SubscriptionsModel)
+                    .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
+                    .filter(
+                        SubscriptionsModel.user_id == user.id,
+                        SubscriptionsModel.status == "active",
+                        PackagesModel.id != free_package_id  # Exclude free plan 
+                    )
+                    .first()
                 )
-                .first()
-            )
-            
-            # If no paid subscription, fall back to free plan
-            if not active_subscription:
+                
+                # If no paid subscription, fall back to free plan
+                if not active_subscription:
+                    active_subscription = (
+                        db.query(SubscriptionsModel)
+                        .filter(
+                            SubscriptionsModel.user_id == user.id,
+                            SubscriptionsModel.status == "active",
+                            SubscriptionsModel.package_id == free_package_id  # Free plan
+                        )
+                        .first()
+                    )
+                
+                if active_subscription:
+                    package = (
+                        db.query(PackagesModel)
+                        .filter(PackagesModel.id == active_subscription.package_id)
+                        .first()
+                    )
+                    if package:
+                        package_name = package.package_name
+            else:
+                logger.warning("Free package not found in database")
+                # Try to get any active subscription as fallback
                 active_subscription = (
                     db.query(SubscriptionsModel)
                     .filter(
                         SubscriptionsModel.user_id == user.id,
-                        SubscriptionsModel.status == "active",
-                        SubscriptionsModel.package_id == package_id  # Free plan
+                        SubscriptionsModel.status == "active"
                     )
                     .first()
                 )
-            
-            if active_subscription:
-                package = (
-                    db.query(PackagesModel)
-                    .filter(PackagesModel.id == active_subscription.package_id)
-                    .first()
-                )
-                if package:
-                    package_name = package.package_name
+                if active_subscription:
+                    package = (
+                        db.query(PackagesModel)
+                        .filter(PackagesModel.id == active_subscription.package_id)
+                        .first()
+                    )
+                    if package:
+                        package_name = package.package_name
         except Exception as e:
             logger.warning(f"Failed to fetch package name for user {user.id}: {e}")
             # Don't fail the request if package lookup fails
@@ -257,7 +278,7 @@ async def get_current_user(
                 logger.warning(f"Failed to format created_at for user {user.id}: {e}")
         
         return user_models.UserResponse(
-            user_id=user.id,
+            user_id=str(user.id),
             email=user.email,
             full_name=user.full_name,
             role=user.role or "user",  # Default role if not set

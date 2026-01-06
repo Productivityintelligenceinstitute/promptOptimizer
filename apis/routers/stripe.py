@@ -668,7 +668,14 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             return
 
         user_id = db_subscription.user_id
-        was_paid_plan = db_subscription.package_id > 1  # package_id 1 is free plan
+        
+        # Get free package to check if this is a paid plan
+        free_package = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first()
+        if not free_package:
+            logger.error("Free package not found in database. Cannot reactivate free plan.")
+            return
+        
+        was_paid_plan = db_subscription.package_id != free_package.id
 
         # Cancel the subscription
         db_subscription.status = "cancelled"
@@ -685,7 +692,7 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             # Check if free plan subscription already exists for this user
             free_subscription = db.query(SubscriptionsModel).filter(
                 SubscriptionsModel.user_id == user_id,
-                SubscriptionsModel.package_id == 1  # Free plan (package_id = 1)
+                SubscriptionsModel.package_id == free_package.id  # Free plan
             ).first()
 
             if free_subscription:
@@ -707,7 +714,7 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
                 new_free_subscription = SubscriptionsModel(
                     subscription_id=str(uuid4()),
                     user_id=user_id,
-                    package_id=1,  # Free plan
+                    package_id=free_package.id,  # Free plan
                     status="active",
                     auto_renew=True
                 )
@@ -721,7 +728,7 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             other_active_subscriptions = db.query(SubscriptionsModel).filter(
                 SubscriptionsModel.user_id == user_id,
                 SubscriptionsModel.status == "active",
-                SubscriptionsModel.package_id > 1,  # Paid plans only
+                SubscriptionsModel.package_id != free_package.id,  # Paid plans only
                 SubscriptionsModel.subscription_id != db_subscription.subscription_id
             ).all()
 

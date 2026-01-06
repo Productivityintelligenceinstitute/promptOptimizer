@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any
+from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 from typing import Text
 
@@ -8,9 +9,10 @@ class Prompt(BaseModel):
     chat_id: Optional[str] = None
 
 class MessageOut(BaseModel):
+    # Expose the database primary key as `id` in responses
+    id: Optional[UUID] = None
     role: str
     content: Text
-    message_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
