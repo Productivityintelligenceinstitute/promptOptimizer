@@ -1,6 +1,5 @@
-from pydantic import BaseModel, Field
-from uuid import UUID
+from pydantic import BaseModel
 
 class RemoveChat(BaseModel):
-    user_id: UUID = Field(..., description="Message ID")
-    chat_id: UUID = Field(..., description="Message ID")
+    user_id: str
+    chat_id: str

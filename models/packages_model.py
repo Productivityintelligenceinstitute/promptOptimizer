@@ -6,7 +6,7 @@ class CreatePackageRequest(BaseModel):
 
 
 class PackageOut(BaseModel):
-    package_id: int
+    package_id: str
     package_name: str
     is_custom: bool
 

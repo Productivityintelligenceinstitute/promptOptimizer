@@ -1,6 +1,5 @@
-from pydantic import BaseModel, Field
-from uuid import UUID
+from pydantic import BaseModel
 
 class AddToLibraryRequest(BaseModel):
-    user_id: UUID = Field(..., description="User ID")
-    message_id: UUID = Field(..., description="Message ID")
+    user_id: str
+    message_id: str

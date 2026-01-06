@@ -5,7 +5,7 @@ class CreatePermissionRequest(BaseModel):
 
 
 class PermissionOut(BaseModel):
-    permission_id: int
+    permission_id: str
     permission_name: str
 
     class Config:
