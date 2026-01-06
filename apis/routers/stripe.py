@@ -41,22 +41,10 @@ logger = logging.getLogger(__name__)
 stripe_router = APIRouter()
 security = HTTPBearer()
 
-# Plan name to package_id mapping (based on seed data)
-PLAN_TO_PACKAGE_ID: Dict[str, int] = {
-    "Essential": 2,
-    "Pro": 3,
-}
-
 # Plan name to Stripe Price ID mapping
 PLAN_TO_STRIPE_PRICE_ID: Dict[str, Optional[str]] = {
     "Essential": STRIPE_PRICE_ID_ESSENTIAL,
     "Pro": STRIPE_PRICE_ID_PRO,
-}
-
-# Reverse mapping: Stripe Price ID to package_id (for webhook handling)
-STRIPE_PRICE_ID_TO_PACKAGE_ID: Dict[str, int] = {
-    STRIPE_PRICE_ID_ESSENTIAL: 2,  # Essential
-    STRIPE_PRICE_ID_PRO: 3,  # Pro
 }
 
 
@@ -120,13 +108,18 @@ async def create_checkout_session(
                 detail="planName and priceId are required"
             )
 
-        # Validate plan name
-        package_id: Optional[int] = PLAN_TO_PACKAGE_ID.get(plan_name)
-        if not package_id:
+        # Resolve package_id from database using plan name
+        package = (
+            db.query(PackagesModel)
+            .filter(PackagesModel.package_name.ilike(plan_name.lower()))
+            .first()
+        )
+        if not package:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid plan name: {plan_name}. Valid plans: {list(PLAN_TO_PACKAGE_ID.keys())}"
+                detail=f"Invalid plan name: {plan_name}"
             )
+        package_id = package.id
 
         # Verify price_id matches plan
         expected_price_id = PLAN_TO_STRIPE_PRICE_ID.get(plan_name)
@@ -146,7 +139,7 @@ async def create_checkout_session(
                     email=user.email,
                     name=user.full_name,
                     metadata={
-                        "user_id": user.user_id,
+                        "user_id": str(user.id),
                         "firebase_uid": firebase_uid,
                     }
                 )
@@ -156,7 +149,7 @@ async def create_checkout_session(
                 user.stripe_customer_id = stripe_customer_id
                 db.commit()
                 db.refresh(user)
-                logger.info(f"Created Stripe customer {stripe_customer_id} for user {user.user_id}")
+                logger.info(f"Created Stripe customer {stripe_customer_id} for user {user.id}")
             except stripe.error.StripeError as e:
                 logger.error(f"Stripe error creating customer: {e}")
                 raise HTTPException(
@@ -220,13 +213,13 @@ async def create_checkout_session(
                 success_url=success_url,
                 cancel_url=cancel_url,
                 metadata={
-                    "user_id": user.user_id,
+                    "user_id": str(user.id),
                     "package_id": str(package_id),
                     "plan_name": plan_name,
                 },
                 subscription_data={
                     "metadata": {
-                        "user_id": user.user_id,
+                        "user_id": str(user.id),
                         "package_id": str(package_id),
                         "plan_name": plan_name,
                     }
@@ -235,7 +228,7 @@ async def create_checkout_session(
             )
 
             logger.info(
-                f"Created checkout session {checkout_session.id} for user {user.user_id}, plan {plan_name}"
+                f"Created checkout session {checkout_session.id} for user {user.id}, plan {plan_name}"
             )
 
             return {
@@ -362,8 +355,8 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         if not user_id or not package_id_str:
             logger.error(f"Missing metadata in checkout session: {session.get('id')}")
             return
-
-        package_id = int(package_id_str)
+        # package_id is stored as a UUID string in metadata
+        package_id = package_id_str
         subscription_id_stripe = session.get('subscription')
 
         if not subscription_id_stripe:
@@ -380,27 +373,14 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         stripe_customer_id = subscription_obj.customer
         stripe_price_id = subscription_obj['items']['data'][0]['price']['id']
 
-        # Cancel any existing active subscriptions for this user (including free plan)
-        # This ensures only one active subscription exists per user
         existing_subscriptions = db.query(SubscriptionsModel).filter(
             SubscriptionsModel.user_id == user_id,
             SubscriptionsModel.status == "active"
         ).all()
 
-        cancelled_count = 0
         for existing_sub in existing_subscriptions:
-            # Cancel all other active subscriptions (including free plan when upgrading to paid)
-            if existing_sub.package_id != package_id:
-                existing_sub.status = "cancelled"
-                existing_sub.updated_at = datetime.now()
-                cancelled_count += 1
-                logger.info(
-                    f"Cancelled existing subscription {existing_sub.subscription_id} "
-                    f"(package_id: {existing_sub.package_id}) for user {user_id}"
-                )
-        
-        if cancelled_count > 0:
-            logger.info(f"Cancelled {cancelled_count} existing subscription(s) for user {user_id}")
+            existing_sub.status = "cancelled"
+            existing_sub.updated_at = datetime.now()
 
         # Check if subscription already exists
         existing_subscription = db.query(SubscriptionsModel).filter(
@@ -426,7 +406,6 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         else:
             # Create new subscription record
             new_subscription = SubscriptionsModel(
-                subscription_id=str(uuid4()),
                 user_id=user_id,
                 package_id=package_id,
                 status="active",
@@ -463,11 +442,20 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
         if not user_id or not package_id_str:
             logger.warning(f"Missing metadata in subscription: {subscription.get('id')}")
             return
-
-        package_id = int(package_id_str)
+        # package_id is stored as a UUID string in metadata
+        package_id = package_id_str
         stripe_subscription_id = subscription['id']
         stripe_customer_id = subscription['customer']
         stripe_price_id = subscription['items']['data'][0]['price']['id']
+
+        existing_active_subscriptions = db.query(SubscriptionsModel).filter(
+            SubscriptionsModel.user_id == user_id,
+            SubscriptionsModel.status == "active"
+        ).all()
+
+        for existing_sub in existing_active_subscriptions:
+            existing_sub.status = "cancelled"
+            existing_sub.updated_at = datetime.now()
 
         # Check if subscription already exists by stripe_subscription_id OR (user_id, package_id)
         existing_by_stripe_id = db.query(SubscriptionsModel).filter(
@@ -506,7 +494,6 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
         else:
             # Create subscription record if it doesn't exist
             new_subscription = SubscriptionsModel(
-                subscription_id=str(uuid4()),
                 user_id=user_id,
                 package_id=package_id,
                 status=subscription['status'],
@@ -570,17 +557,10 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
         except (KeyError, IndexError, AttributeError) as e:
             logger.warning(f"Could not extract price_id from subscription {stripe_subscription_id}: {e}")
 
-        # Determine new package_id from price_id
-        if stripe_price_id and stripe_price_id in STRIPE_PRICE_ID_TO_PACKAGE_ID:
-            new_package_id = STRIPE_PRICE_ID_TO_PACKAGE_ID[stripe_price_id]
-        else:
-            # Fallback: check metadata for package_id
-            metadata = subscription.get('metadata', {})
-            if 'package_id' in metadata:
-                try:
-                    new_package_id = int(metadata['package_id'])
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid package_id in metadata for subscription {stripe_subscription_id}")
+        # Determine new package_id from metadata (stored as UUID string)
+        metadata = subscription.get('metadata', {})
+        if 'package_id' in metadata:
+            new_package_id = metadata['package_id']
 
         # Detect plan change (upgrade or downgrade)
         plan_changed = False
@@ -591,33 +571,18 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
                 f"package_id {db_subscription.package_id} -> {new_package_id}"
             )
 
-        # If plan changed, cancel all other active subscriptions for this user
-        # This ensures only one active subscription exists per user
-        if plan_changed:
-            existing_subscriptions = db.query(SubscriptionsModel).filter(
-                SubscriptionsModel.user_id == db_subscription.user_id,
-                SubscriptionsModel.status == "active",
-                SubscriptionsModel.subscription_id != db_subscription.subscription_id
-            ).all()
+        existing_subscriptions = db.query(SubscriptionsModel).filter(
+            SubscriptionsModel.user_id == db_subscription.user_id,
+            SubscriptionsModel.status == "active",
+            SubscriptionsModel.id != db_subscription.id
+        ).all()
 
-            cancelled_count = 0
-            for existing_sub in existing_subscriptions:
-                existing_sub.status = "cancelled"
-                existing_sub.updated_at = datetime.now()
-                cancelled_count += 1
-                logger.info(
-                    f"Cancelled existing subscription {existing_sub.subscription_id} "
-                    f"(package_id: {existing_sub.package_id}) due to plan change "
-                    f"for subscription {stripe_subscription_id}"
-                )
+        for existing_sub in existing_subscriptions:
+            existing_sub.status = "cancelled"
+            existing_sub.updated_at = datetime.now()
 
-            if cancelled_count > 0:
-                logger.info(
-                    f"Cancelled {cancelled_count} existing subscription(s) for user "
-                    f"{db_subscription.user_id} due to plan change"
-                )
-
-            # Update package_id
+        # Update package_id if plan changed
+        if plan_changed and new_package_id:
             db_subscription.package_id = new_package_id
 
         # Update subscription status
@@ -703,7 +668,7 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
                     free_subscription.updated_at = datetime.now()
                     logger.info(
                         f"Reactivated existing free plan subscription "
-                        f"({free_subscription.subscription_id}) for user {user_id}"
+                        f"({free_subscription.id}) for user {user_id}"
                     )
                 else:
                     logger.info(
@@ -712,7 +677,6 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             else:
                 # Create new free subscription if it doesn't exist
                 new_free_subscription = SubscriptionsModel(
-                    subscription_id=str(uuid4()),
                     user_id=user_id,
                     package_id=free_package.id,  # Free plan
                     status="active",
@@ -729,14 +693,14 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
                 SubscriptionsModel.user_id == user_id,
                 SubscriptionsModel.status == "active",
                 SubscriptionsModel.package_id != free_package.id,  # Paid plans only
-                SubscriptionsModel.subscription_id != db_subscription.subscription_id
+                SubscriptionsModel.id != db_subscription.id
             ).all()
 
             for other_sub in other_active_subscriptions:
                 other_sub.status = "cancelled"
                 other_sub.updated_at = datetime.now()
                 logger.info(
-                    f"Cancelled additional active subscription {other_sub.subscription_id} "
+                    f"Cancelled additional active subscription {other_sub.id} "
                     f"(package_id: {other_sub.package_id}) for user {user_id}"
                 )
 
