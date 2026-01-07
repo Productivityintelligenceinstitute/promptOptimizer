@@ -25,7 +25,9 @@ def get_chat_messages_service(chat_id, db: Session):
 def delete_chat_service(payload, db: Session):
     try:
         ChatRepository.delete_chat(payload.user_id, payload.chat_id, db)
-        raise NotFoundException("Chat not found")
-    
+        return {"detail": "Chat deleted successfully"}
+    except HTTPException:
+        # Re-raise HTTPExceptions (e.g., 404 Chat not found) directly
+        raise
     except Exception as e:
         raise HTTPException(detail=str(e), status_code=500)
