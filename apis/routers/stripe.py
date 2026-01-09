@@ -379,8 +379,8 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         ).all()
 
         for existing_sub in existing_subscriptions:
-                existing_sub.status = "cancelled"
-                existing_sub.updated_at = datetime.now()
+            existing_sub.status = "cancelled"
+            existing_sub.updated_at = datetime.now()
 
         # Check if subscription already exists
         existing_subscription = db.query(SubscriptionsModel).filter(
@@ -558,8 +558,8 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
             logger.warning(f"Could not extract price_id from subscription {stripe_subscription_id}: {e}")
 
         # Determine new package_id from metadata (stored as UUID string)
-            metadata = subscription.get('metadata', {})
-            if 'package_id' in metadata:
+        metadata = subscription.get('metadata', {})
+        if 'package_id' in metadata:
             new_package_id = metadata['package_id']
 
         # Detect plan change (upgrade or downgrade)
@@ -571,15 +571,15 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
                 f"package_id {db_subscription.package_id} -> {new_package_id}"
             )
 
-            existing_subscriptions = db.query(SubscriptionsModel).filter(
-                SubscriptionsModel.user_id == db_subscription.user_id,
-                SubscriptionsModel.status == "active",
+        existing_subscriptions = db.query(SubscriptionsModel).filter(
+            SubscriptionsModel.user_id == db_subscription.user_id,
+            SubscriptionsModel.status == "active",
             SubscriptionsModel.id != db_subscription.id
-            ).all()
+        ).all()
 
-            for existing_sub in existing_subscriptions:
-                existing_sub.status = "cancelled"
-                existing_sub.updated_at = datetime.now()
+        for existing_sub in existing_subscriptions:
+            existing_sub.status = "cancelled"
+            existing_sub.updated_at = datetime.now()
 
         # Update package_id if plan changed
         if plan_changed and new_package_id:
