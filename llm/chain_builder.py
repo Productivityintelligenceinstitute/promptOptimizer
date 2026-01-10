@@ -29,7 +29,7 @@ def build_refined_prompt_summary_chain():
 
 def build_mastery_level_optimization_chain():
     optimizer = get_prompt_optimizer_model()
-    parser = StrOutputParser()
+    parser = JsonOutputParser()
     return prompts.master_level_prompt | optimizer | parser
 
 def build_schema_validation_chain():

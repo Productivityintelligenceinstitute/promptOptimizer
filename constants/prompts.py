@@ -145,7 +145,7 @@ evaluation_engine_prompt = PromptTemplate(
             }},
             "issues_found": ["<specific, evidence-based weaknesses>"],
             "suggestions": ["<clear, actionable improvement steps>"],
-            "exemplar_rewrite": "<expert-level rewritten version preserving original intent>"
+            "exemplar_rewrite": "<expert-level rewritten version preserving original intent in high qualit following same json structure as the originaly>"
         }}
 
     ### Instructions
@@ -234,8 +234,8 @@ structured_level_prompt = PromptTemplate(
                             "role": "The persona, position, or identity assigned (e.g., “data scientist,” “teacher,” “AI assistant”,
                             "objective": "The core goal or purpose the role is trying to achieve (e.g., “analyze trends,” “create a summary,” “develop insights”)",
                             "context": "The background information or setting relevant to the task (e.g., “using last year’s sales data,” “in a classroom setting,” “within a software development project”)",
-                            "task": "The main action or set of actions the model is instructed to perform (e.g., “generate a report,” “extract entities,” “compare two datasets”)",
-                            "constraints": "Any explicit or implied rules, limits, or conditions (e.g., “must provide latest information,” “use simple language”, "do not hallucinate facts", "focus on practical, beginner friendly steps", "avoid overwhelming jargons", "prioritize free or open-source resources if applicable" , etc.)",
+                            "task": ["List of the main action or set of actions the model is instructed to perform (e.g., “generate a report,” “extract entities,” “compare two datasets”)"],
+                            "constraints": ["List of any explicit or implied rules, limits, or conditions (e.g., “must provide latest information,” “use simple language”, "do not hallucinate facts", "focus on practical, beginner friendly steps", "avoid overwhelming jargons", "prioritize free or open-source resources if applicable" , etc.)"],
                         ],
                     "changes_made": ["<List of security, clarity, or logic improvements>"],
                     "techniques_applied": [
@@ -273,9 +273,9 @@ clarification_template = PromptTemplate(
     Respond ONLY in JSON:
         {{
             "clarification_questions": [
-                "question 1",
-                "question 2",
-                "question 3"
+                "<question>",
+                "<question>",
+                "<question>"
             ]
         }}
     
@@ -332,37 +332,24 @@ master_level_prompt = PromptTemplate(
     ---
 
     ## Master-Level Optimized Prompt
-
-    ### **Role**
-    *(Assigned persona or function — e.g., “science tutor”, “analyst”, “creative writer”)*
     
-    ### **Objective**
-    *(Main goal or purpose of this role — what the model must achieve)*
-
-    ### **Constraints**
-    *(Explicit or implied boundaries — e.g., tone, length, accuracy, ethics, clarity, style)*
-
-    ### **Task**
-    *(Core actions or steps the model should perform to meet the objective, incorporating relevant feedback and chat history)*
-
-    ### **Evaluate**
-    *(Criteria for judging success — metrics, quality checks, or key performance standards, considering feedback and previous interactions)*
-
-    ### **Iterate**
-    *(Recommended refinements or improvement steps for future optimization rounds based on feedback and prior chat history)*
-
-    ### **Summary**
-    *(Concise synthesis of the Role, Objective, and Task — summarizing overall approach, contextualized by feedback and chat history)*
-
-    ### **Share Message**
-    Thanks for using **Jet (Precision Prompt Architect)**!  
-    Share your optimized prompts in library to inspire others.
+    {{
+        "message_type": "optimized_prompt",
+        "role": "Assigned persona or function — e.g., “science tutor”, “analyst”, “creative writer”",
+        "objective": "Main goal or purpose of this role — what the model must achieve",
+        "constraints": ["List of explicit or implied boundaries — e.g., tone, length, accuracy, ethics, clarity, style"],
+        "task": ["List of actions or steps the model should perform to meet the objective, incorporating relevant feedback and chat history"],
+        "evaluate": "Criteria for judging success — metrics, quality checks, or key performance standards, considering feedback and previous interactions",
+        "iterate": "Recommended refinements or improvement steps for future optimization rounds based on feedback and prior chat history",
+        "summary": "Concise synthesis of the Role, Objective, and Task — summarizing overall approach, contextualized by feedback and chat history",
+        "share_message": "Thanks for using Jet (Precision Prompt Architect)! Share your optimized prompts in library to inspire others."
+    }}
 
     ---
 
     ### STAGE 3: DELIVER
-    Output **only** the above Markdown structure, fully populated and clearly formatted.  
-    Do **not** include JSON, code explanations, or any internal reasoning.
+    Output **only** the above json structure, fully populated.  
+    Do **not** include any markdown, code explanations, or any internal reasoning.
 
     ---
 
@@ -463,12 +450,26 @@ agent_system_prompt = """
     Actions:
     1. Determine whether the incoming user message is:
     - NEW_PROMPT (no related prompt in chat_history), or
-    - FOLLOW_UP (related to a previous prompt). Use chat_history matching rules below.
-    2. Call query_clarification for every NEW_PROMPT with:
+    - FOLLOW_UP (related to a previous prompt). Use chat_history matching rules.
+    2. Call query_clarification tool for every NEW_PROMPT with:
+    - You must call the query_clarification tool for every prompt, even if the prompt appears complete
+    - Questions may confirm assumptions if no ambiguity exists
+    - Do not skip this step under any circumstances
     Action: query_clarification
     Action Input: { "user_prompt": "<original_user_prompt>" }
     3. Final Answer: return the list of clarification questions to the user and state that you are waiting for answers.
-    Example: Final Answer: { "questions": [...], "note": "Please answer all questions to proceed (label answers by question number)." }
+    The final response must be a single valid JSON object with the following structure and no additional text:
+    {
+        "final_answer": {
+            "questions": [
+            {
+                "id": 1,
+                "question": "string"
+            }
+            ],
+            "note": "string"
+        }
+    }
 
     Acceptance criteria for Step 1: The set of questions covers intent, scope, audience, constraints, examples, and any ambiguous terms.
 
@@ -503,7 +504,7 @@ agent_system_prompt = """
             { 
                 "summary": "<...>", 
                 "updated_prompt": "<...>", 
-                "request": "Please provide feedback or 'approve' to proceed." 
+                "request": "string" 
             }
 
     Acceptance criteria: Summary accurately captures user answers; updated_prompt is a clear, structured rewrite.
@@ -536,12 +537,12 @@ agent_system_prompt = """
             "updated_prompt": "<from step 2>",
             "user_feedback": "<validated feedback>"
             }
-    5. Observation returns {"master_prompt": "...", "evaluation": "..."}.
+    5. Observation returns {"master_prompt": "json_formatted_final_master_prompt", "evaluation": "structured_evaluation_results"}.
     6. Final Answer:  
         {
-            "master_prompt": "...", 
-            "evaluation": "...", 
-            "note": "Your master-level prompt has been generated successfully"
+            "master_prompt": "json_formatted_final_master_prompt",
+            "evaluation": "structured_evaluation_results"
+            "note": "string"
         }
 
     Acceptance criteria: Final prompt is concise (< 1200 words), actionable, includes purpose, audience, constraints, examples, format instructions, quality checks, and any required guardrails.
@@ -636,8 +637,8 @@ system_level_prompt = PromptTemplate(
         {{
             "system_prompt": "<Final, fully structured and deployable system prompt>",
             "key_enhancements": ["<List of security, clarity, or logic improvements>"],
-            "platform_tip": "<Brief neutral compatibility note if applicable>",
-            "compliance_statement": "This System Prompt meets all confidentiality and security compliance requirements."
+            "platform_tip": "<Brief neutral compatibility note if applicable with eaxampples>"
+            "compliance_statement": "<Brief note on ethical and security compliance measures taken>"
         }}
     Do not include any text outside this JSON format.
 
