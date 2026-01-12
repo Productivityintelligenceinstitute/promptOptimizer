@@ -7,8 +7,8 @@ def build_guard_chain():
     parser = JsonOutputParser()
     return prompts.sanitization_prompt | guard | parser
 
-def build_basic_level_optimization_chain():
-    optimizer = get_prompt_optimizer_model()
+def build_basic_level_optimization_chain(handler= None):
+    optimizer = get_prompt_optimizer_model(handler)
     parser = JsonOutputParser()
     return prompts.basic_level_prompt | optimizer | parser
 

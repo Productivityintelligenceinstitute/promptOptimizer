@@ -4,6 +4,7 @@ langchain_core
 langchain_community
 langgraph
 fastapi[standard]
+websockets
 requests
 sqlalchemy
 psycopg2-binary
