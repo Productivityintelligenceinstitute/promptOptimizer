@@ -1,4 +1,5 @@
-from fastapi import HTTPException
+from fastapi import WebSocket, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from llm.chains.chat_title_chain import build_chat_title_chain
@@ -13,47 +14,63 @@ from core.exceptions.llm import LLMServiceException
 from utils.guardrails import validate_prompt
 from utils.response_formatter import format_system_opt_response
 
-async def system_level_optimization_service(payload, db: Session):
+async def system_level_optimization_service(websocket: WebSocket, payload: dict, db: Session, handler):
     try:
-        user_id = payload.user_id
+        user_id = payload["user_id"]
+        prompt_text = payload["user_prompt"]
+        chat_id = payload.get("chat_id")
         
         validate_access(db, user_id, "SYS_OPT")
         
-        chat_id = payload.chat_id
         if not chat_id:
             title_chain = build_chat_title_chain()
-            chat_title = title_chain.invoke({"user_prompt": payload.user_prompt})
+            chat_title = await run_in_threadpool(
+                title_chain.invoke,
+                {"user_prompt": prompt_text}
+            )
             
             chat_id = ChatRepository.create_chat(db, user_id, chat_title)
         
         try:
-            validate_prompt(payload.user_prompt)
+            validate_prompt(prompt_text)
         except Exception:
             raise PromptValidationException("Prompt contains restricted content")
         
         MessageRepository.add_user_message(
             db=db,
             chat_id=chat_id,
-            content=payload.user_prompt
+            content=prompt_text
         )
         
-        try:
-            chain = system_optimization_chain()
-            result = chain.invoke({"user_prompt": payload.user_prompt})
-        except Exception:
-            raise LLMServiceException("An error occurred during prompt optimization")
+        await websocket.send_json({"event": "processing"})
         
-        llm_res_id = MessageRepository.add_llm_message(
+        chain = system_optimization_chain(handler= handler)
+        
+        await run_in_threadpool(
+            chain.invoke,
+            {"user_prompt": prompt_text}
+        )
+        
+        llm_message_id = MessageRepository.add_llm_message(
             db=db,
             chat_id=chat_id,
-            content=format_system_opt_response(result)
+            content=handler.final_text
         )
         
-        return {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "message_id": llm_res_id,
-            "response": result
-        }
+        await websocket.send_json({
+            "event": "completed",
+            "chat_id": str(chat_id),
+            "message_id": str(llm_message_id)
+        })
+
+    except PromptValidationException as e:
+        await websocket.send_json({"event": "error", "message": str(e)})
+
+    except LLMServiceException as e:
+        await websocket.send_json({"event": "error", "message": str(e)})
+
     except Exception as e:
-        raise HTTPException(detail=str(e), status_code=500)
+        await websocket.send_json({
+            "event": "error",
+            "message": f"Internal server error occurred: {str(e)}"
+        })

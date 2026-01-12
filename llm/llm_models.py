@@ -19,13 +19,13 @@ def get_evaluation_engine_model():
         model= "gpt-4.1",
     )
 
-def get_prompt_optimizer_model(handler):
+def get_prompt_optimizer_model(handler= None):
     return ChatOpenAI(
         api_key= OPENAI_API_KEY,
         model= "gpt-4.1",
         temperature=0.7,
         streaming= True,
-        callbacks= [handler]
+        callbacks= [handler] if handler else []
     )
 
 def get_chat_title_model():

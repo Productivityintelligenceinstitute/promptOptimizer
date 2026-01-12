@@ -12,8 +12,8 @@ def build_basic_level_optimization_chain(handler= None):
     parser = JsonOutputParser()
     return prompts.basic_level_prompt | optimizer | parser
 
-def build_structured_level_optimization_chain():
-    optimizer = get_prompt_optimizer_model()
+def build_structured_level_optimization_chain(handler= None):
+    optimizer = get_prompt_optimizer_model(handler)
     parser = JsonOutputParser()
     return prompts.structured_level_prompt | optimizer | parser
 
@@ -42,8 +42,8 @@ def build_evaluation_engine_chain():
     parser = JsonOutputParser()
     return prompts.evaluation_engine_prompt | schema_validator | parser
 
-def build_system_level_optimization_chain():
-    optimizer = get_prompt_optimizer_model()
+def build_system_level_optimization_chain(handler= None):
+    optimizer = get_prompt_optimizer_model(handler)
     parser = JsonOutputParser()
     return prompts.system_level_prompt | optimizer | parser
 

@@ -110,6 +110,4 @@ graph.add_edge(START, "chat_node")
 graph.add_conditional_edges("chat_node", should_continue)
 graph.add_edge("tool_node", "chat_node")
 
-# memory = MemorySaver()
-
 workflow = graph.compile()

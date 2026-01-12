@@ -22,7 +22,6 @@ async def optimize_basic_prompt_service(websocket: WebSocket, payload: dict, db:
         
         validate_access(db, user_id, "BASIC_OPT")
         
-        chat_id = chat_id
         if not chat_id:
             title_chain = build_chat_title_chain()
             chat_title = await run_in_threadpool(
