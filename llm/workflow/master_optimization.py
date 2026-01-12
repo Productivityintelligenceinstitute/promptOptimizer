@@ -74,7 +74,7 @@ def master_level_prompt_generation(updated_prompt: str, user_feedback: str):
     evaluation_res = evaluation_engine.invoke({"user_prompt": master_prompt})
     
     return {
-        "master_prompt": schema_res,
+        "master_prompt": master_prompt,
         "evaluation": evaluation_res
     }
 
