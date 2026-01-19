@@ -1,0 +1,42 @@
+# Development Docker Compose Configuration
+# Use this for local development with hot-reloading
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: development
+    volumes:
+      # Mount entire app directory for hot-reloading
+      - .:/app
+      # Exclude virtual environment
+      - /app/myenv
+      - /app/__pycache__
+    ports:
+      - "8000:8000"
+    command: >
+      uvicorn main:app 
+      --host 0.0.0.0 
+      --port 8000 
+      --reload 
+      --reload-dirs=/app
+    
+    # Mount python cache for better performance
+    tmpfs:
+      - /app/__pycache__
+
+  db:
+    environment:
+      # Relaxed settings for development
+      POSTGRES_INITDB_ARGS: ""
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

@@ -1,0 +1,85 @@
+# Production-grade Docker Compose Configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+version: '3.9'
+
+services:
+  db:
+    # Use volumes driver for production persistence
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    environment:
+      # Enable more secure defaults
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=256MB -c max_connections=200"
+    # Add backup container alongside (optional)
+    backup:
+      image: postgres:16-alpine
+      container_name: promptoptimizer_db_backup
+      environment:
+        PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      volumes:
+        - ./backups:/backups
+      command: >
+        sh -c "
+        while true; do
+          pg_dump -h db -U ${POSTGRES_USER:-postgres} ${POSTGRES_DB:-promptoptimizer_db} > /backups/backup_$$(date +%Y%m%d_%H%M%S).sql;
+          find /backups -name 'backup_*.sql' -mtime +7 -delete;
+          sleep 86400;
+        done
+        "
+      depends_on:
+        - db
+      restart: unless-stopped
+
+  app:
+    # Use tagged image in production
+    image: promptoptimizer:latest
+    environment:
+      ENVIRONMENT: production
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx reverse proxy (optional but recommended)
+  nginx:
+    image: nginx:alpine
+    container_name: promptoptimizer_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    networks:
+      - promptoptimizer_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data_prod:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/promptoptimizer/postgres_data

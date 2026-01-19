@@ -7,3 +7,11 @@ uploaded_kb
 __pycache__
 
 firebase-service-account.json
+
+aws/
+
+nginx.conf
+
+awscliv2.zip
+
+awscliv2.zip.sig

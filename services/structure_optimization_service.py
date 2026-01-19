@@ -13,7 +13,6 @@ from repositories.message_repository import MessageRepository
 from llm.chains.structured_optimization_chain import structured_optimization_chain
 
 from utils.guardrails import validate_prompt
-from utils.response_formatter import format_structure_opt_response
 
 async def structured_level_optimization_service(websocket: WebSocket, payload: dict, db: Session, handler):
     try:

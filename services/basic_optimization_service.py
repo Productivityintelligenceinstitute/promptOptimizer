@@ -12,7 +12,6 @@ from core.exceptions.prompt_validation import PromptValidationException
 from core.exceptions.llm import LLMServiceException
 
 from utils.guardrails import validate_prompt
-from utils.response_formatter import format_basic_opt_response
 
 async def optimize_basic_prompt_service(websocket: WebSocket, payload: dict, db: Session, handler):
     try:

@@ -1,0 +1,114 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+myenv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.pytest_cache/
+.hypothesis/
+
+# Virtual environments
+bin/
+Lib/
+Scripts/
+include/
+pyvenv.cfg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+htmlcov/
+.tox/
+.coverage
+test_results/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Documentation
+docs/
+README.md
+LICENSE
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.eggs/
+
+# Node modules (if any frontend assets)
+node_modules/
+npm-debug.log
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# IDE specific
+.vscode
+.idea
+*.iml
+
+# Docker
+Dockerfile.dev
+docker-compose.dev.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Development only
+dev/
+test.py
+debug/
+local_test.py
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Alembic (we'll run migrations in container)
+# but keeping alembic files for reference

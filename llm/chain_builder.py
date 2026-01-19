@@ -17,18 +17,8 @@ def build_structured_level_optimization_chain(handler= None):
     parser = JsonOutputParser()
     return prompts.structured_level_prompt | optimizer | parser
 
-def build_clarification_chain():
-    optimizer = get_prompt_optimizer_model()
-    parser = JsonOutputParser()
-    return prompts.clarification_template | optimizer | parser
-
-def build_refined_prompt_summary_chain():
-    optimizer = get_prompt_optimizer_model()
-    parser = JsonOutputParser()
-    return prompts.refined_prompt_summary_template | optimizer | parser
-
-def build_mastery_level_optimization_chain():
-    optimizer = get_prompt_optimizer_model()
+def build_mastery_level_optimization_chain(handler= None):
+    optimizer = get_prompt_optimizer_model(handler)
     parser = JsonOutputParser()
     return prompts.master_level_prompt | optimizer | parser
 

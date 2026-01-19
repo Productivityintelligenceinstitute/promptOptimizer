@@ -17,32 +17,42 @@ from schemas.user_model import UserModel
 def seed_packages(db: Session):
     package_names = ["free", "essential", "pro"]
     
-    for package_name in package_names:
-        # Check if package already exists
-        existing = db.query(PackagesModel).filter(PackagesModel.package_name == package_name).first()
-        if not existing:
-            new_package = PackagesModel(
-                package_name=package_name,
-                is_custom=False
-            )
-            db.add(new_package)
-    
-    db.commit()
+    try:
+        for package_name in package_names:
+            # Check if package already exists
+            existing = db.query(PackagesModel).filter(PackagesModel.package_name == package_name).first()
+            if not existing:
+                new_package = PackagesModel(
+                    package_name=package_name,
+                    is_custom=False
+                )
+                db.add(new_package)
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"✗ Error seeding packages: {e}")
+        raise
 
 
 def seed_permissions(db: Session):
     permission_names = ["BASIC_OPT", "STRUCT_OPT", "MASTER_OPT", "SYS_OPT", "LIB"]
     
-    for permission_name in permission_names:
-        # Check if permission already exists
-        existing = db.query(PermissionModel).filter(PermissionModel.permission_name == permission_name).first()
-        if not existing:
-            new_permission = PermissionModel(
-                permission_name=permission_name
-            )
-            db.add(new_permission)
-    
-    db.commit()
+    try:
+        for permission_name in permission_names:
+            # Check if permission already exists
+            existing = db.query(PermissionModel).filter(PermissionModel.permission_name == permission_name).first()
+            if not existing:
+                new_permission = PermissionModel(
+                    permission_name=permission_name
+                )
+                db.add(new_permission)
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"✗ Error seeding permissions: {e}")
+        raise
 
 
 def seed_packages_permissions(db: Session):
@@ -116,22 +126,51 @@ def seed_packages_permissions(db: Session):
     db.commit()
 
 def seed_default_user(db: Session):
-    default_admin = UserModel(
-        full_name="JPO Admin",
-        role="admin",
-        email="jetpromptoptimizer@gmail.com",
-        firebase_uid="my-firebase-uid"
-    )
-    
-    db.add(default_admin)
-    db.commit()
+    try:
+        # Check if admin user already exists
+        existing = db.query(UserModel).filter(
+            UserModel.email == "jetpromptoptimizer@gmail.com"
+        ).first()
+        
+        if not existing:
+            default_admin = UserModel(
+                full_name="JPO Admin",
+                role="admin",
+                email="jetpromptoptimizer@gmail.com",
+                firebase_uid="5yO8C3AZ8yULnZM0i78r8eRHxah2"
+            )
+            db.add(default_admin)
+            db.commit()
+            print("✓ Seeded default admin user")
+        else:
+            print("✓ Default admin user already exists")
+    except Exception as e:
+        db.rollback()
+        print(f"✗ Error seeding default user: {e}")
+        raise
 
 def run_seed():
     db = database.SessionLocal()
     try:
+        print("\n=== Starting Database Seeding ===")
+        print("(Note: Tables are created by Alembic migrations, not here)")
+        
+        print("\n1. Seeding packages...")
         seed_packages(db)
+        
+        print("2. Seeding permissions...")
         seed_permissions(db)
+        
+        print("3. Seeding package-permission relations...")
         seed_packages_permissions(db)
+        
+        print("4. Seeding default user...")
+        seed_default_user(db)
+        
+        print("\n=== Database Seeding Completed Successfully ===\n")
+    except Exception as e:
+        print(f"\n✗ Seed script failed: {e}\n")
+        raise
     finally:
         db.close()
 
