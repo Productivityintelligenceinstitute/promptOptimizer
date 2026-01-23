@@ -14,9 +14,15 @@ def get_library_service(user_id, db: Session, page: int, size: int, search: str 
         role = RoleRepository.check_role(db, user_id)
         
         if role != "admin":
-            access = AccessRepository.check_access(db, user_id, "LIB")
-            if not access:
-                raise AuthorizationException("Library access denied")
+            items, total = LibraryRepository.get_by_user_paginated(user_id, db, page, size, search)
+            pages = (total + size - 1) // size
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "size": size,
+                "pages": pages
+            }
         
         items, total = LibraryRepository.get_all_entries_paginated(db, page, size, search)
         pages = (total + size - 1) // size
@@ -29,17 +35,6 @@ def get_library_service(user_id, db: Session, page: int, size: int, search: str 
         }
     except Exception as e:
         raise HTTPException(detail=str(e), status_code=500)
-    
-def my_library_service(user_id, db: Session, page: int, size: int, search: str | None = None):
-    items, total = LibraryRepository.get_by_user_paginated(user_id, db, page, size, search)
-    pages = (total + size - 1) // size
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "size": size,
-        "pages": pages
-    }
 
 def add_to_library_service(payload, db: Session):
     try:
