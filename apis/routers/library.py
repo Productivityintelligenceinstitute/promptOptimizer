@@ -6,7 +6,7 @@ from database import database
 from models import library_model
 from schemas.user_model import UserModel
 
-from services.ibrary_service import (
+from services.library_service import (
         add_to_library_service, 
         get_library_service, 
         my_library_service, 
