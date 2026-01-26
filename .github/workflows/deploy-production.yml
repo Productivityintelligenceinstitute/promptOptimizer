@@ -1,0 +1,101 @@
+name: Production Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - feature/websocket  # Deploy when code is pushed to main branch
+  workflow_dispatch:  # Allow manual deployment from GitHub UI
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🔑 Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 🐳 Build and Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "Building Docker image..."
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+                       -f Dockerfile .
+          
+          echo "Pushing to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "✅ Image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: 🚀 Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          envs: ECR_REGISTRY,ECR_REPOSITORY,AWS_REGION
+          script: |
+            echo "🔐 Logging into ECR..."
+            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+            
+            echo "📥 Pulling latest image..."
+            docker pull $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            
+            echo "🛑 Stopping old container..."
+            docker stop promptoptimizer 2>/dev/null || true
+            docker rm promptoptimizer 2>/dev/null || true
+            
+            echo "🚀 Starting new container..."
+            docker run -d \
+              --name promptoptimizer \
+              --restart unless-stopped \
+              -p 8000:8000 \
+              --env-file ~/.env.production \
+              -v ~/uploaded_kb:/app/uploaded_kb \
+              $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            
+            echo "🧹 Cleaning up old images..."
+            docker image prune -af --filter "until=48h"
+            
+            echo "✅ Deployment completed successfully!"
+            
+            echo "📊 Container status:"
+            docker ps | grep promptoptimizer
+
+      - name: ✅ Deployment Summary
+        if: success()
+        run: |
+          echo "🎉 Deployment Successful!"
+          echo "📦 Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          echo "🔗 Commit: ${{ github.sha }}"
+          echo "👤 Deployed by: ${{ github.actor }}"
+
+      - name: ❌ Deployment Failed
+        if: failure()
+        run: |
+          echo "💥 Deployment Failed!"
+          echo "Please check the logs above for errors"
+          echo "Rollback may be required - see ROLLBACK_GUIDE.md"
