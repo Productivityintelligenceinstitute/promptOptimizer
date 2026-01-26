@@ -65,13 +65,12 @@ jobs:
             docker pull $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
             echo "🛑 Stopping old container..."
-            docker stop promptoptimizer 2>/dev/null || true
-            docker rm promptoptimizer 2>/dev/null || true
-
+            docker stop jpo-app 2>/dev/null || true
+            docker rm jpo-app 2>/dev/null || true
+            
             echo "🚀 Starting new container..."
             docker run -d \
-              --name promptoptimizer \
-              --restart unless-stopped \
+              --name jpo-app \
               -p 8000:8000 \
               --env-file ~/.env.production \
               -v ~/uploaded_kb:/app/uploaded_kb \
@@ -83,7 +82,7 @@ jobs:
             echo "✅ Deployment completed successfully!"
 
             echo "📊 Container status:"
-            docker ps | grep promptoptimizer
+            docker ps | grep jpo-app
 
       - name: ✅ Deployment Summary
         if: success()
