@@ -9,6 +9,9 @@ firebase_creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 if firebase_creds_json:
     # Load from environment variable (production)
     cred_dict = json.loads(firebase_creds_json)
+    # Fix escaped newlines in private_key (replace \\n with actual newlines)
+    if "private_key" in cred_dict:
+        cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
     cred = credentials.Certificate(cred_dict)
 else:
     # Load from file (local development)
