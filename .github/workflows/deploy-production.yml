@@ -68,10 +68,12 @@ jobs:
             docker stop jpo-app 2>/dev/null || true
             docker rm jpo-app 2>/dev/null || true
 
-            echo " Starting new container..."
+            echo "🚀 Starting new container..."
             docker run -d \
               --name jpo-app \
-              --restart unless-stopped \              --network ubuntu_promptoptimizer_network \              -p 8000:8000 \
+              --restart unless-stopped \
+              --network ubuntu_promptoptimizer_network \
+              -p 8000:8000 \
               --env-file ~/.env \
               -v ~/uploaded_kb:/app/uploaded_kb \
               $ECR_REGISTRY/$ECR_REPOSITORY:latest
