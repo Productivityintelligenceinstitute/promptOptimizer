@@ -52,11 +52,12 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
+          FIREBASE_CREDS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          envs: ECR_REGISTRY,ECR_REPOSITORY,AWS_REGION
+          envs: ECR_REGISTRY,ECR_REPOSITORY,AWS_REGION,FIREBASE_CREDS
           script: |
             echo "🔐 Logging into ECR..."
             aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
@@ -67,6 +68,12 @@ jobs:
             echo "🛑 Stopping old container..."
             docker stop jpo-app 2>/dev/null || true
             docker rm jpo-app 2>/dev/null || true
+
+            echo "🔑 Updating Firebase credentials in .env..."
+            # Remove old Firebase credential line if exists
+            sed -i '/^FIREBASE_SERVICE_ACCOUNT_JSON=/d' ~/.env
+            # Add new Firebase credential
+            echo "FIREBASE_SERVICE_ACCOUNT_JSON='$FIREBASE_CREDS'" >> ~/.env
 
             echo "🚀 Starting new container..."
             docker run -d \
