@@ -72,8 +72,8 @@ jobs:
             echo "🔑 Updating Firebase credentials in .env..."
             # Remove old Firebase credential line if exists
             sed -i '/^FIREBASE_SERVICE_ACCOUNT_JSON=/d' ~/.env
-            # Add new Firebase credential
-            echo "FIREBASE_SERVICE_ACCOUNT_JSON='$FIREBASE_CREDS'" >> ~/.env
+            # Add Firebase credential as single-line JSON (remove all newlines and extra spaces)
+            printf "FIREBASE_SERVICE_ACCOUNT_JSON='%s'\n" "$(echo "$FIREBASE_CREDS" | tr -d '\n' | tr -s ' ')" >> ~/.env
 
             echo "🚀 Starting new container..."
             docker run -d \
