@@ -71,8 +71,7 @@ jobs:
             echo " Starting new container..."
             docker run -d \
               --name jpo-app \
-              --restart unless-stopped \
-              -p 8000:8000 \
+              --restart unless-stopped \              --network ubuntu_promptoptimizer_network \              -p 8000:8000 \
               --env-file ~/.env \
               -v ~/uploaded_kb:/app/uploaded_kb \
               $ECR_REGISTRY/$ECR_REPOSITORY:latest
