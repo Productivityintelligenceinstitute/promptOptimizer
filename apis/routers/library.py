@@ -9,7 +9,7 @@ from schemas.user_model import UserModel
 from services.library_service import (
         add_to_library_service, 
         get_library_service, 
-        # my_library_service, 
+        my_library_service, 
         remove_from_library_service
     )
 
@@ -38,6 +38,17 @@ async def get_library(
 ):
     user_uuid = _get_user_uuid(user_id, db)
     return get_library_service(user_uuid, db, page, size, q)
+
+@library_router.get("/me")
+async def my_library(
+    user_id: str,
+    page: int = 1,
+    size: int = 50,
+    q: str | None = None,
+    db: Session = Depends(database.get_db),
+):
+    user_uuid = _get_user_uuid(user_id, db)
+    return my_library_service(user_uuid, db, page, size, q)
 
 @library_router.post("/add")
 async def add_to_library(payload: library_model.AddToLibraryRequest, db: Session = Depends(database.get_db)):
