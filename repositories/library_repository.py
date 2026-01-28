@@ -1,6 +1,7 @@
 from schemas.library_model import LibraryModel
 from schemas.user_model import UserModel
 from schemas.messages_model import MessagesModel
+from uuid import UUID
 
 class LibraryRepository:
     @staticmethod
@@ -69,7 +70,7 @@ class LibraryRepository:
                 LibraryModel.created_at
             )
             .join(MessagesModel, LibraryModel.message_id == MessagesModel.id)
-            .filter(LibraryModel.user_id == user_id)
+            .filter(LibraryModel.user_id == UUID(user_id))
             .order_by(LibraryModel.created_at.desc())
         )
 
