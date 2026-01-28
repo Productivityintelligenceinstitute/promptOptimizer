@@ -39,7 +39,7 @@ async def get_library(
     user_uuid = _get_user_uuid(user_id, db)
     return get_library_service(user_uuid, db, page, size, q)
 
-@library_router.get("/me/{user_id}")
+@library_router.get("/me")
 async def my_library(
     user_id: str,
     page: int = 1,
