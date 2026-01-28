@@ -63,25 +63,34 @@ class LibraryRepository:
     
     @staticmethod
     def get_by_user_paginated(user_id, db, page: int, size: int, search: str | None = None):
+        try:
+            user_uuid = UUID(str(user_id))
+        except ValueError:
+            raise ValueError("Invalid user_id")
+
+        page = max(page, 1)
+        size = min(max(size, 1), 100)
+
         base_query = (
             db.query(
-                MessagesModel.id,
+                MessagesModel.id.label("message_id"),
                 MessagesModel.content,
-                LibraryModel.created_at
+                LibraryModel.created_at.label("added_at")
             )
+            .select_from(LibraryModel)
             .join(MessagesModel, LibraryModel.message_id == MessagesModel.id)
-            .filter(LibraryModel.user_id == UUID(user_id))
-            .order_by(LibraryModel.created_at.desc())
+            .filter(LibraryModel.user_id == user_uuid)
         )
 
         if search:
-            like = f"%{search}%"
-            base_query = base_query.filter(MessagesModel.content.ilike(like))
+            search = search.strip()
+            base_query = base_query.filter(MessagesModel.content.ilike(f"%{search}%"))
 
-        total = base_query.count()
+        total = base_query.order_by(None).count()
 
         records = (
             base_query
+            .order_by(LibraryModel.created_at.desc())
             .offset((page - 1) * size)
             .limit(size)
             .all()
@@ -89,14 +98,15 @@ class LibraryRepository:
 
         items = [
             {
-                "message_id": msg_id,
-                "content": content,
-                "added_at": created_at
+                "message_id": r.message_id,
+                "content": r.content,
+                "added_at": r.added_at
             }
-            for msg_id, content, created_at in records
+            for r in records
         ]
 
         return items, total
+
     
     @staticmethod
     def delete(db, message_id):
