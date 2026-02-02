@@ -60,7 +60,8 @@ async def master_level_optimization_service(websocket: WebSocket, payload: dict,
         await websocket.send_json({
             "event": "completed",
             "chat_id": str(chat_id),
-            "message_id": str(llm_message_id)
+            "message_id": str(llm_message_id),
+            "prompt_type": "master"
         })
 
     except PromptValidationException as e:

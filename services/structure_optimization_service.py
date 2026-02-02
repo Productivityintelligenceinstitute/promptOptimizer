@@ -60,7 +60,8 @@ async def structured_level_optimization_service(websocket: WebSocket, payload: d
         await websocket.send_json({
             "event": "completed",
             "chat_id": str(chat_id),
-            "message_id": str(llm_message_id)
+            "message_id": str(llm_message_id),
+            "prompt_type": "structured"
         })
 
     except PromptValidationException as e:

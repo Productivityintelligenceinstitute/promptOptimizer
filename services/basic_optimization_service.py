@@ -59,7 +59,8 @@ async def optimize_basic_prompt_service(websocket: WebSocket, payload: dict, db:
         await websocket.send_json({
             "event": "completed",
             "chat_id": str(chat_id),
-            "message_id": str(llm_message_id)
+            "message_id": str(llm_message_id),
+            "prompt_type": "basic"
         })
 
     except PromptValidationException as e:
