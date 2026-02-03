@@ -11,6 +11,7 @@ class MessagesModel(database.Base):
     chat_id = Column(UUID(as_uuid= True), ForeignKey('chats.id', ondelete='CASCADE'))
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    message_type = Column(String, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text('now()'), nullable=False)
     chats = relationship("ChatModel",back_populates="messages")

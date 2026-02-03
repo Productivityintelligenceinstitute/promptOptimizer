@@ -38,7 +38,8 @@ async def system_level_optimization_service(websocket: WebSocket, payload: dict,
         MessageRepository.add_user_message(
             db=db,
             chat_id=chat_id,
-            content=prompt_text
+            content=prompt_text,
+            message_type="user_prompt"
         )
         
         await websocket.send_json({"event": "processing"})
@@ -53,7 +54,8 @@ async def system_level_optimization_service(websocket: WebSocket, payload: dict,
         llm_message_id = MessageRepository.add_llm_message(
             db=db,
             chat_id=chat_id,
-            content=handler.final_text
+            content=handler.final_text,
+            message_type="system"
         )
         
         await websocket.send_json({

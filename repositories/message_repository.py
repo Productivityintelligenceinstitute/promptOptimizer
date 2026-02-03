@@ -2,22 +2,24 @@ from schemas.messages_model import MessagesModel
 
 class MessageRepository:
     @staticmethod
-    def add_user_message(db, chat_id, content):
+    def add_user_message(db, chat_id, content, message_type):
         new_message = MessagesModel(
             chat_id=chat_id,
             role= "user",
-            content=content
+            content=content,
+            message_type=message_type
         )
         db.add(new_message)
         db.commit()
         db.refresh(new_message)
     
     @staticmethod
-    def add_llm_message(db, chat_id, content):
+    def add_llm_message(db, chat_id, content, message_type):
         new_message = MessagesModel(
             chat_id=chat_id,
             role= "assistant",
-            content=content
+            content=content,
+            message_type=message_type
         )
         db.add(new_message)
         db.commit()
@@ -34,7 +36,7 @@ class MessageRepository:
             .all()
         )
         return [
-            {"role": r.role, "content": r.content}
+            {"role": r.role, "content": r.content, "message_type": r.message_type}
             for r in reversed(records)
         ]
     
