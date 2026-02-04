@@ -13,6 +13,7 @@ class MessageOut(BaseModel):
     id: Optional[UUID] = None
     role: str
     content: Text
+    message_type: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
