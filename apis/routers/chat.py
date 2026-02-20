@@ -8,12 +8,13 @@ from database import database
 from schemas.user_model import UserModel
 
 from services.chat_service import (
-        get_chat_list_service,
-        get_chat_messages_service,
-        delete_chat_service
-    )
+    get_chat_list_service,
+    get_chat_messages_service,
+    delete_chat_service,
+)
 
 chat_router = APIRouter()
+
 
 @chat_router.get("/chat-list")
 async def get_chat_list(user_id: str, db: Session = Depends(database.get_db)):
@@ -24,7 +25,15 @@ async def get_chat_list(user_id: str, db: Session = Depends(database.get_db)):
         return get_chat_list_service(user_uuid, db)
     except ValueError:
         # If not a valid UUID, treat it as Firebase UID and look up the user
-        user = db.query(UserModel).filter(UserModel.firebase_uid == user_id).first()
+        user = (
+            db.query(UserModel)
+            .filter(
+                UserModel.firebase_uid == user_id,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
+            .first()
+        )
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return get_chat_list_service(user.id, db)

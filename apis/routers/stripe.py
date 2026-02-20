@@ -87,7 +87,11 @@ async def create_checkout_session(
         # Get user from database
         user: Optional[UserModel] = (
             db.query(UserModel)
-            .filter(UserModel.firebase_uid == firebase_uid)
+            .filter(
+                UserModel.firebase_uid == firebase_uid,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
             .first()
         )
 
@@ -373,6 +377,17 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         stripe_customer_id = subscription_obj.customer
         stripe_price_id = subscription_obj['items']['data'][0]['price']['id']
 
+        # Get period timestamps - may be missing for incomplete/trialing subscriptions
+        try:
+            period_start = subscription_obj['current_period_start']
+            period_end = subscription_obj['current_period_end']
+        except (KeyError, TypeError, AttributeError):
+            period_start = int(datetime.utcnow().timestamp())
+            period_end = period_start + 30 * 24 * 3600  # ~1 month fallback
+            logger.warning(f"Subscription {subscription_id_stripe} missing period dates, using fallback")
+        start_date = datetime.fromtimestamp(period_start)
+        end_date = datetime.fromtimestamp(period_end)
+
         existing_subscriptions = db.query(SubscriptionsModel).filter(
             SubscriptionsModel.user_id == user_id,
             SubscriptionsModel.status == "active"
@@ -394,12 +409,8 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
             existing_subscription.stripe_customer_id = stripe_customer_id
             existing_subscription.stripe_subscription_id = subscription_id_stripe
             existing_subscription.stripe_price_id = stripe_price_id
-            existing_subscription.start_date = datetime.fromtimestamp(
-                subscription_obj.current_period_start
-            )
-            existing_subscription.end_date = datetime.fromtimestamp(
-                subscription_obj.current_period_end
-            )
+            existing_subscription.start_date = start_date
+            existing_subscription.end_date = end_date
             existing_subscription.auto_renew = True
             existing_subscription.updated_at = datetime.now()
             logger.info(f"Updated subscription for user {user_id}, plan {plan_name}")
@@ -412,8 +423,8 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=subscription_id_stripe,
                 stripe_price_id=stripe_price_id,
-                start_date=datetime.fromtimestamp(subscription_obj.current_period_start),
-                end_date=datetime.fromtimestamp(subscription_obj.current_period_end),
+                start_date=start_date,
+                end_date=end_date,
                 auto_renew=True
             )
             db.add(new_subscription)
@@ -616,11 +627,12 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
 
 async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session) -> None:
     """
-    Handle subscription cancellation/deletion
-    
-    When a paid subscription is cancelled:
-    - Marks the subscription as cancelled
-    - Automatically reactivates the free plan to ensure user always has an active subscription
+    Handle subscription cancellation/deletion.
+
+    New behavior:
+    - Marks the subscription as cancelled and non-renewing.
+    - Does NOT reactivate or create a free plan; users without an active paid plan
+      (or valid trial) will lose access and must subscribe again.
     """
     try:
         stripe_subscription_id = subscription['id']
@@ -633,14 +645,6 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             return
 
         user_id = db_subscription.user_id
-        
-        # Get free package to check if this is a paid plan
-        free_package = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first()
-        if not free_package:
-            logger.error("Free package not found in database. Cannot reactivate free plan.")
-            return
-        
-        was_paid_plan = db_subscription.package_id != free_package.id
 
         # Cancel the subscription
         db_subscription.status = "cancelled"
@@ -652,62 +656,10 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
             f"(package_id: {db_subscription.package_id}, user_id: {user_id})"
         )
 
-        # If this was a paid subscription, reactivate free plan
-        if was_paid_plan:
-            # Check if free plan subscription already exists for this user
-            free_subscription = db.query(SubscriptionsModel).filter(
-                SubscriptionsModel.user_id == user_id,
-                SubscriptionsModel.package_id == free_package.id  # Free plan
-            ).first()
-
-            if free_subscription:
-                # Reactivate existing free subscription if it's not already active
-                if free_subscription.status != "active":
-                    free_subscription.status = "active"
-                    free_subscription.auto_renew = True
-                    free_subscription.updated_at = datetime.now()
-                    logger.info(
-                        f"Reactivated existing free plan subscription "
-                        f"({free_subscription.id}) for user {user_id}"
-                    )
-                else:
-                    logger.info(
-                        f"Free plan subscription already active for user {user_id}"
-                    )
-            else:
-                # Create new free subscription if it doesn't exist
-                new_free_subscription = SubscriptionsModel(
-                    user_id=user_id,
-                    package_id=free_package.id,  # Free plan
-                    status="active",
-                    auto_renew=True
-                )
-                db.add(new_free_subscription)
-                logger.info(
-                    f"Created new free plan subscription for user {user_id} "
-                    f"after cancelling paid subscription"
-                )
-
-            # Also cancel any other active paid subscriptions (edge case: multiple active subscriptions)
-            other_active_subscriptions = db.query(SubscriptionsModel).filter(
-                SubscriptionsModel.user_id == user_id,
-                SubscriptionsModel.status == "active",
-                SubscriptionsModel.package_id != free_package.id,  # Paid plans only
-                SubscriptionsModel.id != db_subscription.id
-            ).all()
-
-            for other_sub in other_active_subscriptions:
-                other_sub.status = "cancelled"
-                other_sub.updated_at = datetime.now()
-                logger.info(
-                    f"Cancelled additional active subscription {other_sub.id} "
-                    f"(package_id: {other_sub.package_id}) for user {user_id}"
-                )
-
         db.commit()
         logger.info(
             f"Successfully processed cancellation for subscription {stripe_subscription_id}. "
-            f"Free plan {'reactivated' if was_paid_plan else 'unchanged'} for user {user_id}"
+            f"User {user_id} now has no active subscription for this plan."
         )
 
     except SQLAlchemyError as e:

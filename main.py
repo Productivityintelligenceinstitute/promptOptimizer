@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+import asyncio
+import logging
+import sys
 
 from apis.routers.prompt_optimization import prompt_optimization_router
 from apis.routers.accounts import accounts_router
@@ -21,13 +24,34 @@ from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
 
 from database.database import create_db_tables
+from background.tasks.user_cleanup import user_cleanup_loop
 import schemas
 import firebse.firebase_setup
 
+
+def _setup_cleanup_logging():
+    """Ensure user cleanup task logs appear on the server console."""
+    log = logging.getLogger("background.tasks.user_cleanup")
+    log.setLevel(logging.INFO)
+    if not log.handlers:
+        h = logging.StreamHandler(sys.stderr)
+        h.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        log.addHandler(h)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure tables exist (for dev environments); production should rely on migrations.
     create_db_tables()
+
+    _setup_cleanup_logging()
+    # Start background user cleanup loop (soft deletes of long-expired, inactive users)
+    asyncio.create_task(user_cleanup_loop())
+
     yield
+
 
 app = FastAPI(title="Jet Prompt Optimizer APIs", lifespan=lifespan)
 

@@ -15,3 +15,9 @@ nginx.conf
 awscliv2.zip
 
 awscliv2.zip.sig
+
+CURSOR_HANDOFF_PROMPT.md
+seed_dummy_test_data.py
+seed_frontend_test_data.py
+TESTING_WITH_SEEDED_DATA.md
+TRIAL_TESTING_GUIDE.md
