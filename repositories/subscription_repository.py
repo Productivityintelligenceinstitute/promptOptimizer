@@ -59,3 +59,40 @@ class SubscriptionRepository:
             )
             .first()
         )
+
+    @staticmethod
+    def get_active_with_package(user_id, db):
+        """
+        Return the first active subscription for a user along with its package.
+
+        Returns:
+            (subscription, package) tuple or None.
+        """
+        result = (
+            db.query(SubscriptionsModel, PackagesModel)
+            .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
+            .filter(
+                SubscriptionsModel.user_id == user_id,
+                SubscriptionsModel.status == "active",
+            )
+            .first()
+        )
+        return result
+
+    @staticmethod
+    def get_latest_subscription_with_package(user_id, db):
+        """
+        Return the most recent subscription for a user (any status) with its package.
+        Used for admin display of subscription status (e.g. Canceled, Past Due).
+
+        Returns:
+            (subscription, package) tuple or None.
+        """
+        result = (
+            db.query(SubscriptionsModel, PackagesModel)
+            .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
+            .filter(SubscriptionsModel.user_id == user_id)
+            .order_by(SubscriptionsModel.updated_at.desc())
+            .first()
+        )
+        return result

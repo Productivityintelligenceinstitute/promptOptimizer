@@ -42,11 +42,15 @@ def cancel_subscription_service(payload, db: Session):
                 return {"status": "No active subscription to cancel"}
             
             SubscriptionRepository.cancel(active_subscription, db)
-            
-            free_plan = SubscriptionRepository.get_free_plan(payload.user_id, db)
-            if free_plan:
-                SubscriptionRepository.activate(free_plan, db)
-            
+
+            # Legacy behavior: reactivate or create a free plan after cancelling paid.
+            # This is now disabled in favor of a clear trial → paid flow where users
+            # must subscribe to a paid plan after trial/cancel to regain access.
+            #
+            # free_plan = SubscriptionRepository.get_free_plan(payload.user_id, db)
+            # if free_plan:
+            #     SubscriptionRepository.activate(free_plan, db)
+
             return {"status": "Subscription cancelled"}
     except Exception as e:
         raise HTTPException(detail=str(e), status_code=500)

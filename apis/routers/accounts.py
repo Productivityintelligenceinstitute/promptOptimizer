@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from uuid import uuid4
 from typing import Optional
+from datetime import datetime, timedelta
 import logging
 
 from models import user_models
@@ -62,7 +63,7 @@ async def create_account(
             stripped_name = request.full_name.strip()
             full_name = stripped_name if stripped_name else None
 
-        # Check if user already exists
+        # Check if user already exists (including soft-deleted ones)
         existing_user: Optional[UserModel] = (
             db.query(UserModel)
             .filter(UserModel.firebase_uid == firebase_uid)
@@ -102,20 +103,50 @@ async def create_account(
             db.add(new_user)
             db.flush()  # Flush to get user_id before creating subscription
 
-            package_id = db.query(PackagesModel.id).filter(PackagesModel.package_name == "free").first().id
-            
-            # Create default subscription
-            subscription = SubscriptionsModel(
-                user_id=new_user.id,
-                package_id=package_id,  # Default free package
-                status="active",
-                end_date=None,
+            # Legacy behavior (freemium): assign "free" package with no end_date.
+            # Kept for reference but replaced by time-boxed 14-day trial.
+            # free_package_id = db.query(PackagesModel.id).filter(
+            #     PackagesModel.package_name == "free"
+            # ).first().id
+            # free_subscription = SubscriptionsModel(
+            #     user_id=new_user.id,
+            #     package_id=free_package_id,
+            #     status="active",
+            #     end_date=None,
+            # )
+            # db.add(free_subscription)
+
+            # New behavior: assign a 14-day trial subscription to new users.
+            trial_package = (
+                db.query(PackagesModel)
+                .filter(PackagesModel.package_name == "trial")
+                .first()
             )
-            db.add(subscription)
+            if not trial_package:
+                logger.error("Trial package not found in database")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Trial package is not configured. Please contact support.",
+                )
+
+            trial_start = datetime.utcnow()
+            trial_end = trial_start + timedelta(days=14)
+
+            trial_subscription = SubscriptionsModel(
+                user_id=new_user.id,
+                package_id=trial_package.id,
+                status="active",
+                start_date=trial_start,
+                end_date=trial_end,
+            )
+            db.add(trial_subscription)
+
             db.commit()
             db.refresh(new_user)
 
-            logger.info(f"Created new user account: {new_user.id} for firebase_uid: {firebase_uid}")
+            logger.info(
+                f"Created new user account with 14-day trial: {new_user.id} for firebase_uid: {firebase_uid}"
+            )
             return {"detail": "Account created successfully"}
 
         except SQLAlchemyError as e:
@@ -183,10 +214,14 @@ async def get_current_user(
                 detail="Invalid authentication token: UID not found"
             )
         
-        # Find user by firebase_uid
+        # Find active user by firebase_uid
         user: Optional[UserModel] = (
             db.query(UserModel)
-            .filter(UserModel.firebase_uid == firebase_uid)
+            .filter(
+                UserModel.firebase_uid == firebase_uid,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
             .first()
         )
         
@@ -205,47 +240,46 @@ async def get_current_user(
                 detail="User data is incomplete"
             )
         
-        # Get active subscription package name
-        # Prioritize paid plans over free plan
+        # Get active subscription package name and trial end date (if on trial)
+        # Prioritize paid plans over free/legacy plans
         package_name: Optional[str] = None
+        trial_ends_at: Optional[str] = None
         try:
-            # Get free package to exclude it from paid subscriptions
-            free_package = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first()
+            active_subscription: Optional[SubscriptionsModel] = None
+
+            # Get free package to exclude it from paid/trial subscriptions ordering
+            free_package = (
+                db.query(PackagesModel)
+                .filter(PackagesModel.package_name == "free")
+                .first()
+            )
+
             if free_package:
                 free_package_id = free_package.id
-                
-                # First, try to get paid subscriptions (exclude free plan)
+
+                # First, try to get any non-free active subscription (paid or trial)
                 active_subscription = (
                     db.query(SubscriptionsModel)
                     .join(PackagesModel, SubscriptionsModel.package_id == PackagesModel.id)
                     .filter(
                         SubscriptionsModel.user_id == user.id,
                         SubscriptionsModel.status == "active",
-                        PackagesModel.id != free_package_id  # Exclude free plan 
+                        PackagesModel.id != free_package_id,  # Exclude free plan
                     )
                     .first()
                 )
-                
-                # If no paid subscription, fall back to free plan
+
+                # If no non-free subscription, fall back to free plan (legacy)
                 if not active_subscription:
                     active_subscription = (
                         db.query(SubscriptionsModel)
                         .filter(
                             SubscriptionsModel.user_id == user.id,
                             SubscriptionsModel.status == "active",
-                            SubscriptionsModel.package_id == free_package_id  # Free plan
+                            SubscriptionsModel.package_id == free_package_id,  # Free plan
                         )
                         .first()
                     )
-                
-                if active_subscription:
-                    package = (
-                        db.query(PackagesModel)
-                        .filter(PackagesModel.id == active_subscription.package_id)
-                        .first()
-                    )
-                    if package:
-                        package_name = package.package_name
             else:
                 logger.warning("Free package not found in database")
                 # Try to get any active subscription as fallback
@@ -253,20 +287,30 @@ async def get_current_user(
                     db.query(SubscriptionsModel)
                     .filter(
                         SubscriptionsModel.user_id == user.id,
-                        SubscriptionsModel.status == "active"
+                        SubscriptionsModel.status == "active",
                     )
                     .first()
                 )
-                if active_subscription:
-                    package = (
-                        db.query(PackagesModel)
-                        .filter(PackagesModel.id == active_subscription.package_id)
-                        .first()
-                    )
-                    if package:
-                        package_name = package.package_name
+
+            if active_subscription:
+                package = (
+                    db.query(PackagesModel)
+                    .filter(PackagesModel.id == active_subscription.package_id)
+                    .first()
+                )
+                if package:
+                    package_name = package.package_name
+                    # If the active package is the 14-day trial, surface its end date
+                    if package.package_name == "trial" and active_subscription.end_date:
+                        try:
+                            trial_ends_at = active_subscription.end_date.isoformat()
+                        except (AttributeError, ValueError) as e:
+                            logger.warning(
+                                f"Failed to format trial end date for user {user.id}: {e}"
+                            )
+
         except Exception as e:
-            logger.warning(f"Failed to fetch package name for user {user.id}: {e}")
+            logger.warning(f"Failed to fetch package information for user {user.id}: {e}")
             # Don't fail the request if package lookup fails
         
         # Format created_at timestamp
@@ -285,6 +329,7 @@ async def get_current_user(
             firebase_uid=user.firebase_uid or firebase_uid,
             created_at=created_at_str,
             package_name=package_name or "free",  # Default to "free" if not found
+            trial_ends_at=trial_ends_at,
         )
         
     except HTTPException:
@@ -306,7 +351,15 @@ async def get_current_user(
 @accounts_router.post("/login-account")
 async def login_account(account: user_models.LoginAccount, db: Session = Depends(database.get_db)):
     try:
-        user = db.query(UserModel).filter(UserModel.email == account.email).first()
+        user = (
+            db.query(UserModel)
+            .filter(
+                UserModel.email == account.email,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
+            .first()
+        )
         if not user or not user.email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -329,10 +382,12 @@ async def delete_account(user_id: str, db: Session = Depends(database.get_db)):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found."
             )
-        
-        db.delete(user)
+
+        # Soft delete: mark user as inactive and set deleted_at, instead of hard-deleting
+        user.is_active = False
+        user.deleted_at = datetime.utcnow()
         db.commit()
-        
+
         return {"detail": "Account deleted successfully."}
     
     except Exception as e:
@@ -340,3 +395,4 @@ async def delete_account(user_id: str, db: Session = Depends(database.get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete account."
         )
+        

@@ -7,13 +7,14 @@ from models import library_model
 from schemas.user_model import UserModel
 
 from services.library_service import (
-        add_to_library_service, 
-        get_library_service, 
-        my_library_service, 
-        remove_from_library_service
-    )
+    add_to_library_service,
+    get_library_service,
+    my_library_service,
+    remove_from_library_service,
+)
 
 library_router = APIRouter(prefix="/library")
+
 
 def _get_user_uuid(user_id: str, db: Session):
     """Convert Firebase UID to user UUID, or return UUID if already valid UUID."""
@@ -23,7 +24,15 @@ def _get_user_uuid(user_id: str, db: Session):
         return user_uuid
     except ValueError:
         # If not a valid UUID, treat it as Firebase UID and look up the user
-        user = db.query(UserModel).filter(UserModel.firebase_uid == user_id).first()
+        user = (
+            db.query(UserModel)
+            .filter(
+                UserModel.firebase_uid == user_id,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
+            .first()
+        )
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return user.id

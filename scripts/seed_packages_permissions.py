@@ -15,7 +15,11 @@ from schemas.user_model import UserModel
 
 
 def seed_packages(db: Session):
-    package_names = ["free", "essential", "pro"]
+    # Legacy default packages included for backward compatibility:
+    # - "free": historical freemium tier (no longer assigned to new users)
+    # - "trial": 14-day trial tier for new users
+    # - "essential", "pro": paid plans
+    package_names = ["free", "trial", "essential", "pro"]
     
     try:
         for package_name in package_names:
@@ -58,6 +62,7 @@ def seed_permissions(db: Session):
 def seed_packages_permissions(db: Session):
     
     free_package = db.query(PackagesModel).filter(PackagesModel.package_name == "free").first()
+    trial_package = db.query(PackagesModel).filter(PackagesModel.package_name == "trial").first()
     essential_package = db.query(PackagesModel).filter(PackagesModel.package_name == "essential").first()
     pro_package = db.query(PackagesModel).filter(PackagesModel.package_name == "pro").first()
     
@@ -67,11 +72,12 @@ def seed_packages_permissions(db: Session):
     sys_opt_permission = db.query(PermissionModel).filter(PermissionModel.permission_name == "SYS_OPT").first()
     lib_permission = db.query(PermissionModel).filter(PermissionModel.permission_name == "LIB").first()
     
-    if not all([free_package, essential_package, pro_package, basic_opt_permission, struct_opt_permission, master_opt_permission, sys_opt_permission, lib_permission]):
+    if not all([free_package, trial_package, essential_package, pro_package, basic_opt_permission, struct_opt_permission, master_opt_permission, sys_opt_permission, lib_permission]):
         print("Warning: Some packages or permissions are missing. Skipping package-permission seeding.")
         return
     
     free_package_id = free_package.id
+    trial_package_id = trial_package.id
     essential_package_id = essential_package.id
     pro_package_id = pro_package.id
     
@@ -88,6 +94,18 @@ def seed_packages_permissions(db: Session):
         (free_package_id, master_opt_permission_id, False, None),
         (free_package_id, sys_opt_permission_id, False, None),
         (free_package_id, lib_permission_id, False, None),
+
+        # TRIAL (14-day, time-boxed access)
+        # - BASIC_OPT: 5 per day
+        # - STRUCT_OPT: 1 per day
+        # - MASTER_OPT: enabled, 5 total over trial enforced in code (no daily cap here)
+        # - SYS_OPT: disabled
+        # - LIB: disabled for trial (can be adjusted later if needed)
+        (trial_package_id, basic_opt_permission_id, True, 5),
+        (trial_package_id, struct_opt_permission_id, True, 1),
+        (trial_package_id, master_opt_permission_id, True, None),
+        (trial_package_id, sys_opt_permission_id, False, None),
+        (trial_package_id, lib_permission_id, True, None),
 
         # ESSENTIAL
         (essential_package_id, basic_opt_permission_id, True, None),

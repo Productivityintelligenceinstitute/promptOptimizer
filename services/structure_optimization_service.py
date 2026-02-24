@@ -19,9 +19,7 @@ async def structured_level_optimization_service(websocket: WebSocket, payload: d
         user_id = payload["user_id"]
         prompt_text = payload["user_prompt"]
         chat_id = payload.get("chat_id")
-        
         validate_access(db, user_id, "STRUCT_OPT")
-
         if not chat_id:
             title_chain = build_chat_title_chain()
             chat_title = await run_in_threadpool(

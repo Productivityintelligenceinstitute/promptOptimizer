@@ -18,9 +18,7 @@ async def master_level_optimization_service(websocket: WebSocket, payload: dict,
         user_id = payload.get("user_id")
         user_prompt = payload.get("user_prompt")
         chat_id = payload.get("chat_id")
-
         validate_access(db, user_id, "MASTER_OPT")
-        
         if not chat_id:
             title_chain = build_chat_title_chain()
             chat_title = await run_in_threadpool(

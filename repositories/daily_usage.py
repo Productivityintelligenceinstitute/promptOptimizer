@@ -1,7 +1,10 @@
-from schemas.usage_log_model import UsageLogModel
 from datetime import date
 
+from sqlalchemy import func
+
+from schemas.usage_log_model import UsageLogModel
 from core.exceptions.rate_limit import RateLimitExceededException
+
 
 class UsageRepository:
     @staticmethod
@@ -13,7 +16,7 @@ class UsageRepository:
             .filter(
                 UsageLogModel.user_id == user_id,
                 UsageLogModel.permission_id == permission_id,
-                UsageLogModel.date == today
+                UsageLogModel.date == today,
             )
             .first()
         )
@@ -22,7 +25,42 @@ class UsageRepository:
 
         if daily_limit is not None and used >= daily_limit:
             raise RateLimitExceededException("Daily usage limit exceeded.")
-    
+
+    @staticmethod
+    def check_trial_total_usage(
+        db,
+        user_id,
+        permission_id,
+        trial_start_date,
+        trial_end_date,
+        total_limit: int,
+    ):
+        """
+        Enforce a total cap on usage for a given permission within the trial window.
+
+        This is used for MASTER_OPT in the 14-day trial:
+        - Sum all UsageLogModel.count values between trial_start_date and trial_end_date (inclusive)
+        - If the total is >= total_limit (e.g., 5), raise a limit exception.
+        """
+        if total_limit is None or not trial_start_date or not trial_end_date:
+            return
+
+        total_used = (
+            db.query(func.coalesce(func.sum(UsageLogModel.count), 0))
+            .filter(
+                UsageLogModel.user_id == user_id,
+                UsageLogModel.permission_id == permission_id,
+                UsageLogModel.date >= trial_start_date,
+                UsageLogModel.date <= trial_end_date,
+            )
+            .scalar()
+        )
+
+        if total_used is not None and total_used >= total_limit:
+            raise RateLimitExceededException(
+                "Trial usage limit exceeded for this optimization level."
+            )
+
     @staticmethod
     def increment_daily_usage(db, user_id, permission_id):
         today = date.today()
@@ -32,7 +70,7 @@ class UsageRepository:
             .filter(
                 UsageLogModel.user_id == user_id,
                 UsageLogModel.permission_id == permission_id,
-                UsageLogModel.date == today
+                UsageLogModel.date == today,
             )
             .with_for_update()
             .first()
@@ -46,7 +84,18 @@ class UsageRepository:
                     user_id=user_id,
                     permission_id=permission_id,
                     date=today,
-                    count=1
+                    count=1,
                 )
             )
         db.commit()
+
+    @staticmethod
+    def get_last_activity_date(db, user_id):
+        """
+        Return the most recent usage date for the given user, or None if no usage.
+        """
+        return (
+            db.query(func.max(UsageLogModel.date))
+            .filter(UsageLogModel.user_id == user_id)
+            .scalar()
+        )
