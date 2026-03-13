@@ -105,6 +105,7 @@ async def create_checkout_session(
         # Extract request parameters
         plan_name: Optional[str] = request.get("planName")
         price_id: Optional[str] = request.get("priceId")
+        discount_code: Optional[str] = request.get("discountCode")
 
         if not plan_name or not price_id:
             raise HTTPException(
@@ -204,32 +205,63 @@ async def create_checkout_session(
                 detail=f"Failed to verify price: {str(e)}"
             )
 
+        # If a discount/pilot code is provided, validate it against Stripe Promotion Codes
+        promotion_code_id: Optional[str] = None
+        if discount_code:
+            try:
+                promo_list = stripe.PromotionCode.list(
+                    code=discount_code,
+                    active=True,
+                    limit=1,
+                )
+                if not promo_list.data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid or expired discount code."
+                    )
+                promotion_code_id = promo_list.data[0].id
+            except HTTPException:
+                # Re-raise HTTPException as-is
+                raise
+            except stripe.error.StripeError as e:
+                logger.error(f"Stripe error validating promotion code '{discount_code}': {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="There was a problem validating your discount code. Please try again or contact support."
+                )
+
         # Create Checkout Session
+        # Stripe forbids both allow_promotion_codes and discounts on the same session.
         try:
-            checkout_session = stripe.checkout.Session.create(
-                customer=stripe_customer_id,
-                payment_method_types=['card'],
-                line_items=[{
-                    'price': price_id,
-                    'quantity': 1,
+            session_kwargs: Dict[str, Any] = {
+                "customer": stripe_customer_id,
+                "payment_method_types": ["card"],
+                "line_items": [{
+                    "price": price_id,
+                    "quantity": 1,
                 }],
-                mode='subscription',
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={
+                "mode": "subscription",
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": {
                     "user_id": str(user.id),
                     "package_id": str(package_id),
                     "plan_name": plan_name,
                 },
-                subscription_data={
+                "subscription_data": {
                     "metadata": {
                         "user_id": str(user.id),
                         "package_id": str(package_id),
                         "plan_name": plan_name,
                     }
                 },
-                allow_promotion_codes=True,
-            )
+            }
+            if promotion_code_id:
+                session_kwargs["discounts"] = [{"promotion_code": promotion_code_id}]
+            else:
+                session_kwargs["allow_promotion_codes"] = True
+
+            checkout_session = stripe.checkout.Session.create(**session_kwargs)
 
             logger.info(
                 f"Created checkout session {checkout_session.id} for user {user.id}, plan {plan_name}"
