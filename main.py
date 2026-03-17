@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 import sys
+from functools import partial
 
 from apis.routers.prompt_optimization import prompt_optimization_router
 from apis.routers.accounts import accounts_router
@@ -19,6 +20,8 @@ from admin.routes.packages_permission import packages_permission_router
 from admin.routes.update_role import update_role_router
 from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
+
+from admin.core.ingestion_job import ingest_job
 
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
@@ -41,6 +44,54 @@ def _setup_cleanup_logging():
         log.addHandler(h)
 
 
+# --- KB Ingestion Queue Logic ---
+job_queue: asyncio.Queue = asyncio.Queue(maxsize=20)
+semaphore = asyncio.Semaphore(2)
+active_jobs = 0
+worker_tasks: list[asyncio.Task] = []
+
+kb_logger = logging.getLogger("kb_ingestion_worker")
+if not kb_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    )
+    kb_logger.addHandler(handler)
+kb_logger.setLevel(logging.INFO)
+
+
+async def worker() -> None:
+    global active_jobs
+    loop = asyncio.get_running_loop()
+    while True:
+        job_id, filename, save_path = await job_queue.get()
+        try:
+            async with semaphore:
+                active_jobs += 1
+                kb_logger.info(
+                    "Worker picked up job %s for %s. Active jobs: %s",
+                    job_id,
+                    filename,
+                    active_jobs,
+                )
+                await loop.run_in_executor(
+                    None, partial(ingest_job, job_id, filename, save_path)
+                )
+        except Exception:
+            kb_logger.exception(
+                "Worker: Error processing job %s for %s", job_id, filename
+            )
+        finally:
+            active_jobs -= 1
+            job_queue.task_done()
+            kb_logger.info(
+                "Worker finished job %s for %s. Active jobs: %s",
+                job_id,
+                filename,
+                active_jobs,
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure tables exist (for dev environments); production should rely on migrations.
@@ -50,7 +101,20 @@ async def lifespan(app: FastAPI):
     # Start background user cleanup loop (soft deletes of long-expired, inactive users)
     asyncio.create_task(user_cleanup_loop())
 
-    yield
+    # Start KB ingestion workers and expose queue/status on app.state
+    global worker_tasks
+    worker_tasks = [asyncio.create_task(worker()) for _ in range(2)]
+    app.state.job_queue = job_queue
+    app.state.active_jobs = lambda: active_jobs
+    kb_logger.info("Started 2 ingestion workers.")
+
+    try:
+        yield
+    finally:
+        for task in worker_tasks:
+            task.cancel()
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+        kb_logger.info("Shutdown: All ingestion workers cancelled.")
 
 
 app = FastAPI(title="Jet Prompt Optimizer APIs", lifespan=lifespan)
