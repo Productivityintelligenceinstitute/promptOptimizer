@@ -7,6 +7,7 @@ from schemas.permission_model import PermissionModel
 from schemas.packages_permission_model import PackagesPermissionModel
 from schemas.subscription_model import SubscriptionsModel
 from schemas.usage_log_model import UsageLogModel
+from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel
 
 __all__ = [
     "ChatModel",
@@ -18,4 +19,7 @@ __all__ = [
     "PackagesPermissionModel",
     "SubscriptionsModel",
     "UsageLogModel",
+    "ContextJobModel",
+    "ContextAssetModel",
+    "JobRunModel",
 ]

@@ -12,6 +12,7 @@ from apis.routers.stripe import stripe_router
 from apis.routers.chat import chat_router
 from apis.routers.library import library_router
 from apis.routers.customer_support_chatbot import customer_support_chatbot_router
+from apis.routers.context_jobs import context_jobs_router
 from admin.routes.kb_ingestion import kb_ingestion_router
 
 from admin.routes.permissions import permissioons_router
@@ -129,6 +130,7 @@ app.include_router(stripe_router, prefix="/stripe", tags=["Stripe"])
 app.include_router(prompt_optimization_router, tags=["Prompt Optimization"])
 app.include_router(chat_router, tags=["Chat"])
 app.include_router(library_router, tags=["Library"])
+app.include_router(context_jobs_router, tags=["Context Jobs"])
 app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"])
 app.include_router(permissioons_router, tags=["Admin - Permission Management"])
 app.include_router(packages_router, tags=["Admin - Package Management"])
