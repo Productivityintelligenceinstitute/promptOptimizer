@@ -59,6 +59,30 @@ async def update_job(
 
 
 @context_jobs_router.post(
+    "/jobs/{job_id}/duplicate",
+    response_model=cj_schemas.ContextJobOut,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Context Jobs"],
+)
+async def duplicate_job(job_id: UUID, db: Session = Depends(database.get_db)):
+    job = cj_services.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return cj_services.duplicate_job(db, job)
+
+
+@context_jobs_router.get(
+    "/jobs/{job_id}/stats",
+    tags=["Context Jobs"],
+)
+async def get_job_stats(job_id: UUID, db: Session = Depends(database.get_db)):
+    job = cj_services.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return cj_services.get_job_stats(db, job_id)
+
+
+@context_jobs_router.post(
     "/jobs/{job_id}/run",
     response_model=cj_schemas.JobRunOut,
     status_code=status.HTTP_201_CREATED,
@@ -72,7 +96,10 @@ async def run_job(
     job = cj_services.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return cj_services.create_run(db, job_id, payload)
+    try:
+        return cj_services.create_run(db, job_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
 
 
 @context_jobs_router.get(
@@ -85,6 +112,14 @@ async def list_runs(db: Session = Depends(database.get_db)):
 
 
 @context_jobs_router.get(
+    "/runs/queue-status",
+    tags=["Context Jobs"],
+)
+async def get_runs_queue_status():
+    return cj_services.get_queue_status()
+
+
+@context_jobs_router.get(
     "/runs/{run_id}",
     response_model=cj_schemas.JobRunOut,
     tags=["Context Jobs"],
@@ -94,6 +129,30 @@ async def get_run(run_id: UUID, db: Session = Depends(database.get_db)):
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@context_jobs_router.patch(
+    "/runs/{run_id}/decision",
+    response_model=cj_schemas.JobRunOut,
+    tags=["Context Jobs"],
+)
+async def record_run_decision(
+    run_id: UUID,
+    payload: cj_schemas.RunDecisionRequest,
+    db: Session = Depends(database.get_db),
+):
+    run = cj_services.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.state not in {"completed", "failed", "escalated", "repair"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot record a decision on a run that is still in progress",
+        )
+    try:
+        return cj_services.record_human_decision(db, run, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @context_jobs_router.get(
@@ -142,4 +201,13 @@ async def delete_asset(asset_id: UUID, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     cj_services.delete_asset(db, asset)
     return None
+
+
+@context_jobs_router.get(
+    "/stats",
+    response_model=cj_schemas.ContextJobsStatsOut,
+    tags=["Context Jobs"],
+)
+async def get_context_jobs_stats(db: Session = Depends(database.get_db)):
+    return cj_services.get_overall_stats(db)
 

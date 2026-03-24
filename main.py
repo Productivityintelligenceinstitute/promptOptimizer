@@ -23,6 +23,7 @@ from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
 
 from admin.core.ingestion_job import ingest_job
+from context_jobs.orchestrator import start_mock_run_workers, stop_mock_run_workers
 
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
@@ -108,6 +109,8 @@ async def lifespan(app: FastAPI):
     app.state.job_queue = job_queue
     app.state.active_jobs = lambda: active_jobs
     kb_logger.info("Started 2 ingestion workers.")
+    start_mock_run_workers()
+    kb_logger.info("Started context jobs mock run workers.")
 
     try:
         yield
@@ -115,6 +118,7 @@ async def lifespan(app: FastAPI):
         for task in worker_tasks:
             task.cancel()
         await asyncio.gather(*worker_tasks, return_exceptions=True)
+        stop_mock_run_workers()
         kb_logger.info("Shutdown: All ingestion workers cancelled.")
 
 

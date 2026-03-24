@@ -113,7 +113,7 @@ class ContextAssetOut(ContextAssetBase):
 
 
 class JobRunCreate(BaseModel):
-    userRequest: Optional[str] = Field("", alias="userRequest")
+    user_request: Optional[str] = Field("", alias="userRequest")
 
     class Config:
         populate_by_name = True
@@ -121,27 +121,43 @@ class JobRunCreate(BaseModel):
 
 class JobRunOut(BaseModel):
     id: UUID
-    jobId: UUID
+    job_id: UUID = Field(..., alias="jobId")
     state: str
 
-    userRequest: Optional[str] = None
-    startedAt: datetime
-    endedAt: Optional[datetime] = None
+    user_request: Optional[str] = Field(None, alias="userRequest")
+    started_at: datetime = Field(..., alias="startedAt")
+    ended_at: Optional[datetime] = Field(None, alias="endedAt")
 
-    stepLogs: Optional[list] = None
-    retrievalEvents: Optional[list] = None
-    toolEvents: Optional[list] = None
-    validationEvents: Optional[list] = None
-    sourceTraceEvents: Optional[list] = None
-    runOutputPackage: Optional[dict] = None
-    humanDecision: Optional[dict] = None
+    step_logs: Optional[list] = Field(None, alias="stepLogs")
+    retrieval_events: Optional[list] = Field(None, alias="retrievalEvents")
+    tool_events: Optional[list] = Field(None, alias="toolEvents")
+    validation_events: Optional[list] = Field(None, alias="validationEvents")
+    source_trace_events: Optional[list] = Field(None, alias="sourceTraceEvents")
+    run_output_package: Optional[dict] = Field(None, alias="runOutputPackage")
+    human_decision: Optional[dict] = Field(None, alias="humanDecision")
 
     outcome: Optional[str] = None
-    outputText: Optional[str] = None
-    tokenUsage: Optional[int] = None
-    latencyMs: Optional[int] = None
+    output_text: Optional[str] = Field(None, alias="outputText")
+    token_usage: Optional[int] = Field(None, alias="tokenUsage")
+    latency_ms: Optional[int] = Field(None, alias="latencyMs")
 
     class Config:
         from_attributes = True
         populate_by_name = True
+
+
+class RunDecisionRequest(BaseModel):
+    decision: str
+    notes: Optional[str] = None
+    decided_by: str = Field("current_user", alias="decidedBy")
+
+    class Config:
+        populate_by_name = True
+
+
+class ContextJobsStatsOut(BaseModel):
+    jobCount: int
+    runCount: int
+    assetCount: int
+    passRate: int
 
