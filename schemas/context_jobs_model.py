@@ -23,6 +23,8 @@ class ContextJobModel(database.Base):
     stable_instructions = Column(Text, nullable=True)
     role_configuration = Column(Text, nullable=True)
     retrieval_config = Column(JSONB, nullable=True)
+    retrieval_mode = Column(String, nullable=False, default="jet_kb")
+    vector_connection_id = Column(UUID(as_uuid=True), nullable=True)
     memory_config = Column(JSONB, nullable=True)
     tool_permissions = Column(JSONB, nullable=True)
     validation_rules = Column(JSONB, nullable=True)

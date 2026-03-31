@@ -8,6 +8,7 @@ from schemas.packages_permission_model import PackagesPermissionModel
 from schemas.subscription_model import SubscriptionsModel
 from schemas.usage_log_model import UsageLogModel
 from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel
+from schemas.context_vector_connection_model import ContextVectorConnectionModel
 
 __all__ = [
     "ChatModel",
@@ -22,4 +23,5 @@ __all__ = [
     "ContextJobModel",
     "ContextAssetModel",
     "JobRunModel",
+    "ContextVectorConnectionModel",
 ]

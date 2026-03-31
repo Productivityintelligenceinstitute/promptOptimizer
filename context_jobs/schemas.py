@@ -17,6 +17,8 @@ class ContextJobBase(BaseModel):
     role_configuration: Optional[str] = Field(None, alias="roleConfiguration")
 
     retrieval_config: Optional[dict] = Field(None, alias="retrievalConfig")
+    retrieval_mode: str = Field("jet_kb", alias="retrievalMode")
+    vector_connection_id: Optional[UUID] = Field(None, alias="vectorConnectionId")
     memory_config: Optional[dict] = Field(None, alias="memoryConfig")
     tool_permissions: Optional[list[dict]] = Field(None, alias="toolPermissions")
     validation_rules: Optional[list[dict]] = Field(None, alias="validationRules")
@@ -52,6 +54,8 @@ class ContextJobUpdate(BaseModel):
     role_configuration: Optional[str] = Field(None, alias="roleConfiguration")
 
     retrieval_config: Optional[dict] = Field(None, alias="retrievalConfig")
+    retrieval_mode: Optional[str] = Field(None, alias="retrievalMode")
+    vector_connection_id: Optional[UUID] = Field(None, alias="vectorConnectionId")
     memory_config: Optional[dict] = Field(None, alias="memoryConfig")
     tool_permissions: Optional[list[dict]] = Field(None, alias="toolPermissions")
     validation_rules: Optional[list[dict]] = Field(None, alias="validationRules")
