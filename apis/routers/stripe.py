@@ -16,7 +16,6 @@ from datetime import datetime
 from uuid import uuid4
 import stripe
 import logging
-import os
 
 from database import database
 from dependencies.auth import verify_firebase_token
@@ -28,7 +27,8 @@ from core.config import (
     STRIPE_WEBHOOK_SECRET,
     STRIPE_PRICE_ID_ESSENTIAL,
     STRIPE_PRICE_ID_PRO,
-    FRONTEND_URL
+    FRONTEND_URL,
+    AFFILIATE_CODES,
 )
 
 # Initialize Stripe
@@ -38,6 +38,12 @@ if not STRIPE_SECRET_KEY:
 stripe.api_key = STRIPE_SECRET_KEY
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    uvicorn_error_logger = logging.getLogger("uvicorn.error")
+    for h in uvicorn_error_logger.handlers:
+        logger.addHandler(h)
+logger.propagate = False
 stripe_router = APIRouter()
 security = HTTPBearer()
 
@@ -46,7 +52,6 @@ PLAN_TO_STRIPE_PRICE_ID: Dict[str, Optional[str]] = {
     "Essential": STRIPE_PRICE_ID_ESSENTIAL,
     "Pro": STRIPE_PRICE_ID_PRO,
 }
-
 
 @stripe_router.post(
     "/create-checkout-session",
@@ -106,6 +111,29 @@ async def create_checkout_session(
         plan_name: Optional[str] = request.get("planName")
         price_id: Optional[str] = request.get("priceId")
         discount_code: Optional[str] = request.get("discountCode")
+        affiliate_code_raw: Optional[str] = request.get("affiliateCode")
+
+        affiliate_code: Optional[str] = None
+        if isinstance(affiliate_code_raw, str):
+            candidate = affiliate_code_raw.strip().lower()
+            # Allow only safe, short affiliate identifiers
+            if candidate and len(candidate) <= 50 and all(c.isalnum() or c in {"_", "-"} for c in candidate):
+                allowlist = AFFILIATE_CODES
+                if allowlist:
+                    if candidate in allowlist:
+                        affiliate_code = candidate
+                    else:
+                        logger.info("Ignoring unapproved affiliate_code '%s'", candidate)
+                else:
+                    # If no allowlist configured, ignore affiliate codes by default for safety.
+                    logger.info("AFFILIATE_CODES is not configured; ignoring affiliate_code")
+        logger.info(
+            "[AFFILIATE_DEBUG] create_checkout_session request: user_id=%s plan=%s raw_affiliate=%s approved_affiliate=%s",
+            str(user.id),
+            plan_name,
+            affiliate_code_raw,
+            affiliate_code,
+        )
 
         if not plan_name or not price_id:
             raise HTTPException(
@@ -256,6 +284,9 @@ async def create_checkout_session(
                     }
                 },
             }
+            if affiliate_code:
+                session_kwargs["metadata"]["affiliate_code"] = affiliate_code
+                session_kwargs["subscription_data"]["metadata"]["affiliate_code"] = affiliate_code
             if promotion_code_id:
                 session_kwargs["discounts"] = [{"promotion_code": promotion_code_id}]
             else:
@@ -265,6 +296,12 @@ async def create_checkout_session(
 
             logger.info(
                 f"Created checkout session {checkout_session.id} for user {user.id}, plan {plan_name}"
+            )
+            logger.info(
+                "[AFFILIATE_DEBUG] checkout session metadata: session_id=%s metadata=%s subscription_metadata=%s",
+                checkout_session.id,
+                session_kwargs.get("metadata"),
+                session_kwargs.get("subscription_data", {}).get("metadata"),
             )
 
             return {
@@ -387,6 +424,15 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         user_id = metadata.get('user_id')
         package_id_str = metadata.get('package_id')
         plan_name = metadata.get('plan_name')
+        affiliate_code = metadata.get('affiliate_code')
+        logger.info(
+            "[AFFILIATE_DEBUG] webhook checkout.session.completed: session_id=%s user_id=%s plan=%s affiliate_code=%s metadata=%s",
+            session.get("id"),
+            user_id,
+            plan_name,
+            affiliate_code,
+            metadata,
+        )
 
         if not user_id or not package_id_str:
             logger.error(f"Missing metadata in checkout session: {session.get('id')}")
@@ -481,6 +527,14 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
         metadata = subscription.get('metadata', {})
         user_id = metadata.get('user_id')
         package_id_str = metadata.get('package_id')
+        affiliate_code = metadata.get('affiliate_code')
+        logger.info(
+            "[AFFILIATE_DEBUG] webhook customer.subscription.created: subscription_id=%s user_id=%s affiliate_code=%s metadata=%s",
+            subscription.get("id"),
+            user_id,
+            affiliate_code,
+            metadata,
+        )
 
         if not user_id or not package_id_str:
             logger.warning(f"Missing metadata in subscription: {subscription.get('id')}")
