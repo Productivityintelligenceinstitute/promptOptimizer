@@ -37,6 +37,22 @@ if not STRIPE_SECRET_KEY:
 
 stripe.api_key = STRIPE_SECRET_KEY
 
+
+def _stripe_get(obj: Any, key: str, default: Any = None) -> Any:
+    """
+    Stripe SDK returns StripeObject instances — they support obj['key'] but not dict-like .get().
+    Calling .get('foo') is interpreted as obj['get'], which raises KeyError: 'get'.
+    """
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    try:
+        return obj[key]
+    except (KeyError, TypeError):
+        return default
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -206,7 +222,7 @@ async def create_checkout_session(
         try:
             price_obj = stripe.Price.retrieve(price_id)
             # Check if price is active
-            if not price_obj.get('active', False):
+            if not _stripe_get(price_obj, "active", False):
                 logger.warning(f"Price {price_id} is not active")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -390,7 +406,7 @@ async def stripe_webhook(
     
     # Log the event type and ID
     logger.info(f"Received Stripe webhook event: {event_type}")
-    logger.info(f"Event ID: {event.get('id')}")
+    logger.info(f"Event ID: {_stripe_get(event, 'id')}")
 
     try:
         if event_type == 'checkout.session.completed':
@@ -420,14 +436,14 @@ async def stripe_webhook(
 async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> None:
     """Handle successful checkout completion"""
     try:
-        metadata = session.get('metadata', {})
-        user_id = metadata.get('user_id')
-        package_id_str = metadata.get('package_id')
-        plan_name = metadata.get('plan_name')
-        affiliate_code = metadata.get('affiliate_code')
+        metadata = _stripe_get(session, "metadata", {}) or {}
+        user_id = _stripe_get(metadata, "user_id")
+        package_id_str = _stripe_get(metadata, "package_id")
+        plan_name = _stripe_get(metadata, "plan_name")
+        affiliate_code = _stripe_get(metadata, "affiliate_code")
         logger.info(
             "[AFFILIATE_DEBUG] webhook checkout.session.completed: session_id=%s user_id=%s plan=%s affiliate_code=%s metadata=%s",
-            session.get("id"),
+            _stripe_get(session, "id"),
             user_id,
             plan_name,
             affiliate_code,
@@ -435,14 +451,14 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
         )
 
         if not user_id or not package_id_str:
-            logger.error(f"Missing metadata in checkout session: {session.get('id')}")
+            logger.error(f"Missing metadata in checkout session: {_stripe_get(session, 'id')}")
             return
         # package_id is stored as a UUID string in metadata
         package_id = package_id_str
-        subscription_id_stripe = session.get('subscription')
+        subscription_id_stripe = _stripe_get(session, "subscription")
 
         if not subscription_id_stripe:
-            logger.warning(f"No subscription ID in checkout session: {session.get('id')}")
+            logger.warning(f"No subscription ID in checkout session: {_stripe_get(session, 'id')}")
             return
 
         # Retrieve subscription from Stripe to get full details
@@ -524,20 +540,20 @@ async def handle_checkout_completed(session: Dict[str, Any], db: Session) -> Non
 async def handle_subscription_created(subscription: Dict[str, Any], db: Session) -> None:
     """Handle subscription creation event"""
     try:
-        metadata = subscription.get('metadata', {})
-        user_id = metadata.get('user_id')
-        package_id_str = metadata.get('package_id')
-        affiliate_code = metadata.get('affiliate_code')
+        metadata = _stripe_get(subscription, "metadata", {}) or {}
+        user_id = _stripe_get(metadata, "user_id")
+        package_id_str = _stripe_get(metadata, "package_id")
+        affiliate_code = _stripe_get(metadata, "affiliate_code")
         logger.info(
             "[AFFILIATE_DEBUG] webhook customer.subscription.created: subscription_id=%s user_id=%s affiliate_code=%s metadata=%s",
-            subscription.get("id"),
+            _stripe_get(subscription, "id"),
             user_id,
             affiliate_code,
             metadata,
         )
 
         if not user_id or not package_id_str:
-            logger.warning(f"Missing metadata in subscription: {subscription.get('id')}")
+            logger.warning(f"Missing metadata in subscription: {_stripe_get(subscription, 'id')}")
             return
         # package_id is stored as a UUID string in metadata
         package_id = package_id_str
@@ -571,7 +587,7 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
             existing_by_stripe_id.stripe_price_id = stripe_price_id
             existing_by_stripe_id.start_date = datetime.fromtimestamp(subscription['current_period_start'])
             existing_by_stripe_id.end_date = datetime.fromtimestamp(subscription['current_period_end'])
-            existing_by_stripe_id.auto_renew = not subscription.get('cancel_at_period_end', False)
+            existing_by_stripe_id.auto_renew = not _stripe_get(subscription, "cancel_at_period_end", False)
             existing_by_stripe_id.updated_at = datetime.now()
             db.commit()
             logger.info(f"Updated existing subscription from subscription.created event: {stripe_subscription_id}")
@@ -584,7 +600,7 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
             existing_by_user_package.status = subscription['status']
             existing_by_user_package.start_date = datetime.fromtimestamp(subscription['current_period_start'])
             existing_by_user_package.end_date = datetime.fromtimestamp(subscription['current_period_end'])
-            existing_by_user_package.auto_renew = not subscription.get('cancel_at_period_end', False)
+            existing_by_user_package.auto_renew = not _stripe_get(subscription, "cancel_at_period_end", False)
             existing_by_user_package.updated_at = datetime.now()
             db.commit()
             logger.info(f"Updated existing subscription with new stripe_subscription_id: {stripe_subscription_id}")
@@ -599,7 +615,7 @@ async def handle_subscription_created(subscription: Dict[str, Any], db: Session)
                 stripe_price_id=stripe_price_id,
                 start_date=datetime.fromtimestamp(subscription['current_period_start']),
                 end_date=datetime.fromtimestamp(subscription['current_period_end']),
-                auto_renew=not subscription.get('cancel_at_period_end', False)
+                auto_renew=not _stripe_get(subscription, "cancel_at_period_end", False)
             )
             db.add(new_subscription)
             db.commit()
@@ -642,22 +658,21 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
         
         try:
             # Extract price_id from subscription items
-            subscription_items = subscription.get('items', {})
-            if isinstance(subscription_items, dict) and 'data' in subscription_items:
-                items_data = subscription_items['data']
-                if items_data and len(items_data) > 0:
-                    price_obj = items_data[0].get('price', {})
-                    if isinstance(price_obj, dict):
-                        stripe_price_id = price_obj.get('id')
-                    elif hasattr(price_obj, 'id'):
-                        stripe_price_id = price_obj.id
+            subscription_items = _stripe_get(subscription, "items", {}) or {}
+            items_data = _stripe_get(subscription_items, "data", [])
+            if items_data and len(items_data) > 0:
+                price_obj = _stripe_get(items_data[0], "price", {})
+                if isinstance(price_obj, dict):
+                    stripe_price_id = price_obj.get('id')
+                else:
+                    stripe_price_id = _stripe_get(price_obj, "id")
         except (KeyError, IndexError, AttributeError) as e:
             logger.warning(f"Could not extract price_id from subscription {stripe_subscription_id}: {e}")
 
         # Determine new package_id from metadata (stored as UUID string)
-        metadata = subscription.get('metadata', {})
-        if 'package_id' in metadata:
-            new_package_id = metadata['package_id']
+        metadata = _stripe_get(subscription, "metadata", {}) or {}
+        if _stripe_get(metadata, "package_id") is not None:
+            new_package_id = _stripe_get(metadata, "package_id")
 
         # Detect plan change (upgrade or downgrade)
         plan_changed = False
@@ -690,11 +705,12 @@ async def handle_subscription_updated(subscription: Dict[str, Any], db: Session)
             db_subscription.stripe_price_id = stripe_price_id
         
         # Update period end date
-        if 'current_period_end' in subscription:
-            db_subscription.end_date = datetime.fromtimestamp(subscription['current_period_end'])
-        
+        cpe = _stripe_get(subscription, "current_period_end")
+        if cpe is not None:
+            db_subscription.end_date = datetime.fromtimestamp(cpe)
+
         # Update auto-renewal status
-        db_subscription.auto_renew = not subscription.get('cancel_at_period_end', False)
+        db_subscription.auto_renew = not _stripe_get(subscription, "cancel_at_period_end", False)
         db_subscription.updated_at = datetime.now()
 
         db.commit()
@@ -759,7 +775,7 @@ async def handle_subscription_deleted(subscription: Dict[str, Any], db: Session)
 async def handle_payment_succeeded(invoice: Dict[str, Any], db: Session) -> None:
     """Handle successful payment"""
     try:
-        subscription_id_stripe = invoice.get('subscription')
+        subscription_id_stripe = _stripe_get(invoice, "subscription")
         if not subscription_id_stripe:
             # One-time payment, not a subscription
             return
@@ -820,7 +836,7 @@ async def handle_payment_succeeded(invoice: Dict[str, Any], db: Session) -> None
 async def handle_payment_failed(invoice: Dict[str, Any], db: Session) -> None:
     """Handle failed payment"""
     try:
-        subscription_id_stripe = invoice.get('subscription')
+        subscription_id_stripe = _stripe_get(invoice, "subscription")
         if not subscription_id_stripe:
             return
 
