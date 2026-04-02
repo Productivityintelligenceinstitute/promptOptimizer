@@ -20,6 +20,7 @@ from admin.routes.packages_permission import packages_permission_router
 from admin.routes.update_role import update_role_router
 from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
+from admin.routes.affiliate_report import affiliate_report_router
 
 from admin.core.ingestion_job import ingest_job
 
@@ -136,3 +137,4 @@ app.include_router(packages_permission_router, tags=["Admin - Package Permission
 app.include_router(update_role_router, tags=["Admin - Update User Role"])
 app.include_router(assign_package_router, tags=["Admin - Assign Package"])
 app.include_router(users_admin_router, tags=["Admin - Users"])
+app.include_router(affiliate_report_router, tags=["Admin - Affiliate Report"])
