@@ -45,9 +45,10 @@ def prompt_input_checks(prompt):
     return {"res": guard_res}
 
 
-def embed(text: str) -> List[float]:
+def embed(text: str, model: str | None = None) -> List[float]:
+    model_name = model or EMBED_MODEL
     resp = client.embeddings.create(
-        model=EMBED_MODEL,
+        model=model_name,
         input=text
     )
     return resp.data[0].embedding

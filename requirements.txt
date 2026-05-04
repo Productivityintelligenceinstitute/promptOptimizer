@@ -13,6 +13,7 @@ pypdf
 python-docx
 fastapi-pagination
 pinecone
+qdrant-client
 firebase-admin
 stripe
 alembic
