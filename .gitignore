@@ -21,3 +21,34 @@ seed_dummy_test_data.py
 seed_frontend_test_data.py
 TESTING_WITH_SEEDED_DATA.md
 TRIAL_TESTING_GUIDE.md
+
+# ------------------------------------------------------------
+# Local-only QA/testing artifacts (keep local, don't push)
+# ------------------------------------------------------------
+
+# Test and setup utilities
+scripts/
+test_*.py
+setup_*.py
+check_e2e_env.py
+diagnose_ingest_slow.py
+time_managed_ingest.py
+run_context_jobs_e2e_suite.py
+upsert_pdf_to_*.py
+
+# Runtime logs and outputs
+*.log
+*.err.log
+e2e-*.txt
+*output*.txt
+.env.e2e.example
+
+# Local docs and generated docs not required on remote
+*.docx
+*.pdf
+*GUIDE.md
+INGESTION_SYSTEM_SUMMARY.md
+PGVECTOR_CONFIGURATION_TESTING_GUIDE.md
+QDRANT_CONFIGURATION_TESTING_GUIDE.md
+TESTING_WITH_SEEDED_DATA.md
+TRIAL_TESTING_GUIDE.md

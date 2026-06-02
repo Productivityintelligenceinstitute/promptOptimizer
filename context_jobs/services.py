@@ -5,37 +5,108 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from context_jobs import schemas as cj_schemas
+from context_jobs.managed_jet_kb import ensure_managed_namespace
 from context_jobs.orchestrator import enqueue_mock_run, get_mock_queue_status
+from context_jobs.provider_key_services import resolve_llm_api_key
+from context_jobs.vector_connection_services import get_active_connection_for_owner
 from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel
+from schemas.llm_provider_key_model import LlmProviderKeyModel
 
 
-def list_jobs(db: Session) -> List[ContextJobModel]:
-    return db.query(ContextJobModel).order_by(ContextJobModel.created_at.desc()).all()
+def _validate_job_vector_connection(db: Session, data: cj_schemas.ContextJobBase, owner: str) -> None:
+    mode = (getattr(data, "retrieval_mode", None) or "jet_kb").lower()
+    conn_id = getattr(data, "vector_connection_id", None)
+    if mode == "external":
+        if not conn_id:
+            raise ValueError(
+                "retrievalMode external requires vectorConnectionId (pick a saved connection)."
+            )
+        get_active_connection_for_owner(db, conn_id, owner)
+    elif conn_id:
+        raise ValueError("vectorConnectionId is only used when retrievalMode is external.")
 
 
-def get_job(db: Session, job_id: UUID) -> Optional[ContextJobModel]:
-    return db.query(ContextJobModel).filter(ContextJobModel.id == job_id).first()
+def _validate_llm_key(db: Session, owner: str, llm_key_id: Optional[UUID]) -> None:
+    if not llm_key_id:
+        raise ValueError("llmKeyId is required. Add a BYOK LLM key and assign it to this job.")
+    row = (
+        db.query(LlmProviderKeyModel)
+        .filter(
+            LlmProviderKeyModel.id == llm_key_id,
+            LlmProviderKeyModel.owner == owner,
+            LlmProviderKeyModel.status == "active",
+        )
+        .first()
+    )
+    if not row:
+        raise ValueError("Assigned llmKeyId was not found or is inactive for this user.")
 
 
-def create_job(db: Session, data: cj_schemas.ContextJobCreate) -> ContextJobModel:
-    job = ContextJobModel(**data.model_dump(by_alias=False))
+def _maybe_ensure_jet_managed_namespace(db: Session, job: ContextJobModel) -> None:
+    if (job.retrieval_mode or "jet_kb").lower() != "jet_kb":
+        return
+    ensure_managed_namespace(db, job.owner)
+
+
+def list_jobs(db: Session, owner: str) -> List[ContextJobModel]:
+    return (
+        db.query(ContextJobModel)
+        .filter(ContextJobModel.owner == owner)
+        .order_by(ContextJobModel.created_at.desc())
+        .all()
+    )
+
+
+def get_job(db: Session, job_id: UUID, owner: str) -> Optional[ContextJobModel]:
+    return (
+        db.query(ContextJobModel)
+        .filter(ContextJobModel.id == job_id, ContextJobModel.owner == owner)
+        .first()
+    )
+
+
+def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> ContextJobModel:
+    payload = data.model_dump(by_alias=False)
+    payload["owner"] = owner
+    check = cj_schemas.ContextJobCreate(**payload)
+    _validate_job_vector_connection(db, check, owner)
+    _validate_llm_key(db, owner, check.llm_key_id)
+    job = ContextJobModel(**payload)
     db.add(job)
     db.commit()
     db.refresh(job)
+    _maybe_ensure_jet_managed_namespace(db, job)
     return job
 
 
 def update_job(
     db: Session,
+    owner: str,
     job: ContextJobModel,
     data: cj_schemas.ContextJobUpdate,
 ) -> ContextJobModel:
     payload = data.model_dump(exclude_unset=True, by_alias=False)
+    merged_mode = payload.get("retrieval_mode", job.retrieval_mode)
+    merged_conn = payload.get("vector_connection_id", job.vector_connection_id)
+    merged_key = payload.get("llm_key_id", job.llm_key_id)
+    if merged_mode is not None or merged_conn is not None:
+        check = cj_schemas.ContextJobCreate(
+            name=job.name,
+            retrieval_mode=merged_mode,
+            vector_connection_id=merged_conn,
+            owner=owner,
+            llm_key_id=merged_key,
+        )
+        _validate_job_vector_connection(db, check, owner)
+    if "llm_key_id" in payload or merged_key:
+        _validate_llm_key(db, owner, merged_key)
     for key, value in payload.items():
         setattr(job, key, value)
+    job.owner = owner
     db.add(job)
     db.commit()
     db.refresh(job)
+    _maybe_ensure_jet_managed_namespace(db, job)
     return job
 
 
@@ -74,19 +145,41 @@ def delete_asset(db: Session, asset: ContextAssetModel) -> None:
     db.commit()
 
 
-def list_runs(db: Session) -> List[JobRunModel]:
-    return db.query(JobRunModel).order_by(JobRunModel.started_at.desc()).all()
+def list_runs(db: Session, owner: str) -> List[JobRunModel]:
+    job_ids = [
+        job.id
+        for job in db.query(ContextJobModel).filter(ContextJobModel.owner == owner).all()
+    ]
+    if not job_ids:
+        return []
+    return (
+        db.query(JobRunModel)
+        .filter(JobRunModel.job_id.in_(job_ids))
+        .order_by(JobRunModel.started_at.desc())
+        .all()
+    )
 
 
-def get_run(db: Session, run_id: UUID) -> Optional[JobRunModel]:
-    return db.query(JobRunModel).filter(JobRunModel.id == run_id).first()
+def get_run(db: Session, run_id: UUID, owner: str) -> Optional[JobRunModel]:
+    run = db.query(JobRunModel).filter(JobRunModel.id == run_id).first()
+    if not run:
+        return None
+    job = get_job(db, run.job_id, owner)
+    if not job:
+        return None
+    return run
 
 
 def create_run(
     db: Session,
+    owner: str,
     job_id: UUID,
     data: cj_schemas.JobRunCreate,
 ) -> JobRunModel:
+    job = get_job(db, job_id, owner)
+    if not job:
+        raise ValueError("Job not found")
+    resolve_llm_api_key(db, owner, job.llm_key_id)
     run = JobRunModel(job_id=job_id, user_request=data.user_request or "")
     db.add(run)
     db.commit()
@@ -109,7 +202,7 @@ def create_run(
     return run
 
 
-def duplicate_job(db: Session, job: ContextJobModel) -> ContextJobModel:
+def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobModel:
     duplicated = ContextJobModel(
         name=f"{job.name} (Copy)",
         description=job.description,
@@ -120,6 +213,8 @@ def duplicate_job(db: Session, job: ContextJobModel) -> ContextJobModel:
         stable_instructions=job.stable_instructions,
         role_configuration=job.role_configuration,
         retrieval_config=job.retrieval_config,
+        retrieval_mode=job.retrieval_mode,
+        vector_connection_id=job.vector_connection_id,
         memory_config=job.memory_config,
         tool_permissions=job.tool_permissions,
         validation_rules=job.validation_rules,
@@ -128,8 +223,12 @@ def duplicate_job(db: Session, job: ContextJobModel) -> ContextJobModel:
         glossary_terms=job.glossary_terms,
         relationships=job.relationships,
         trusted_sources=job.trusted_sources,
+        execution_provider=job.execution_provider,
+        execution_model=job.execution_model,
+        llm_key_id=job.llm_key_id,
+        max_agent_turns=job.max_agent_turns,
         version=1,
-        owner=job.owner,
+        owner=owner,
         approval_required=job.approval_required,
         policy_profile=job.policy_profile,
     )
@@ -139,7 +238,9 @@ def duplicate_job(db: Session, job: ContextJobModel) -> ContextJobModel:
     return duplicated
 
 
-def get_job_stats(db: Session, job_id: UUID) -> dict:
+def get_job_stats(db: Session, owner: str, job_id: UUID) -> dict:
+    if not get_job(db, job_id, owner):
+        raise ValueError("Job not found")
     runs = db.query(JobRunModel).filter(JobRunModel.job_id == job_id).all()
     total_runs = len(runs)
     completed_runs = len([r for r in runs if r.state == "completed"])
@@ -153,7 +254,11 @@ def get_job_stats(db: Session, job_id: UUID) -> dict:
         if terminal_runs
         else 0
     )
-    recent_runs = sorted(runs, key=lambda r: r.started_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:5]
+    recent_runs = sorted(
+        runs,
+        key=lambda r: r.started_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )[:5]
     return {
         "totalRuns": total_runs,
         "completedRuns": completed_runs,
@@ -177,14 +282,17 @@ def get_job_stats(db: Session, job_id: UUID) -> dict:
 
 def record_human_decision(
     db: Session,
+    owner: str,
     run: JobRunModel,
     data: cj_schemas.RunDecisionRequest,
 ) -> JobRunModel:
+    if not get_job(db, run.job_id, owner):
+        raise ValueError("Run not found")
     if run.human_decision:
         raise ValueError("A decision has already been recorded for this run")
     run.human_decision = {
         "decision": data.decision,
-        "decidedBy": data.decided_by,
+        "decidedBy": data.decided_by or owner,
         "decidedAt": datetime.now(timezone.utc).isoformat(),
         "notes": data.notes or "",
     }
@@ -194,10 +302,10 @@ def record_human_decision(
     return run
 
 
-def get_overall_stats(db: Session) -> dict:
-    jobs = db.query(ContextJobModel).all()
-    runs = db.query(JobRunModel).all()
-    assets = db.query(ContextAssetModel).all()
+def get_overall_stats(db: Session, owner: str) -> dict:
+    jobs = list_jobs(db, owner)
+    runs = list_runs(db, owner)
+    assets = list_assets(db)
     completed_runs = [r for r in runs if r.state == "completed"]
     pass_rate = int((len(completed_runs) / len(runs)) * 100) if runs else 0
     return {
@@ -210,4 +318,3 @@ def get_overall_stats(db: Session) -> dict:
 
 def get_queue_status() -> dict:
     return get_mock_queue_status()
-

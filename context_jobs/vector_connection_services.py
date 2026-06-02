@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -10,13 +10,39 @@ from context_jobs.vector_connection_schemas import VectorConnectionCreate, Vecto
 from schemas.context_vector_connection_model import ContextVectorConnectionModel
 
 
-def list_connections(db: Session, owner: str = "current_user") -> list[ContextVectorConnectionModel]:
-    return (
-        db.query(ContextVectorConnectionModel)
-        .filter(ContextVectorConnectionModel.owner == owner)
-        .order_by(ContextVectorConnectionModel.created_at.desc())
-        .all()
-    )
+class VectorConnectionTestFailed(Exception):
+    """Raised when adapter test_connection fails (create/update must not persist)."""
+
+    def __init__(self, message: str, *, provider: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+        self.provider = provider
+
+
+def test_connection_config(provider: str, config: dict[str, Any]) -> tuple[bool, str]:
+    """Run provider adapter test against config dict (no DB row required)."""
+    adapter = get_retrieval_adapter((provider or "").lower(), config or {})
+    return adapter.test_connection()
+
+
+def _apply_test_result(
+    conn: ContextVectorConnectionModel, ok: bool, message: str
+) -> None:
+    conn.last_tested_at = datetime.now(timezone.utc)
+    conn.last_error = None if ok else message
+    conn.status = "active" if ok else "invalid"
+
+
+def list_connections(
+    db: Session,
+    owner: str = "current_user",
+    *,
+    include_disabled: bool = False,
+) -> list[ContextVectorConnectionModel]:
+    q = db.query(ContextVectorConnectionModel).filter(ContextVectorConnectionModel.owner == owner)
+    if not include_disabled:
+        q = q.filter(ContextVectorConnectionModel.status != "disabled")
+    return q.order_by(ContextVectorConnectionModel.created_at.desc()).all()
 
 
 def get_connection(
@@ -35,13 +61,20 @@ def get_connection(
 def create_connection(
     db: Session, payload: VectorConnectionCreate, owner: str = "current_user"
 ) -> ContextVectorConnectionModel:
+    owner_key = (payload.owner or owner).strip() or "current_user"
+    provider = payload.provider.lower()
+    ok, message = test_connection_config(provider, payload.config)
+    if not ok:
+        raise VectorConnectionTestFailed(message, provider=provider)
+
     conn = ContextVectorConnectionModel(
-        owner=payload.owner or owner,
+        owner=owner_key,
         name=payload.name,
-        provider=payload.provider.lower(),
+        provider=provider,
         encrypted_config=encrypt_config(payload.config),
-        status=payload.status,
+        status="active",
     )
+    _apply_test_result(conn, True, message)
     db.add(conn)
     db.commit()
     db.refresh(conn)
@@ -56,7 +89,11 @@ def update_connection(
     if payload.status is not None:
         conn.status = payload.status
     if payload.config is not None:
+        ok, message = test_connection_config(conn.provider, payload.config)
+        if not ok:
+            raise VectorConnectionTestFailed(message, provider=conn.provider)
         conn.encrypted_config = encrypt_config(payload.config)
+        _apply_test_result(conn, True, message)
     db.add(conn)
     db.commit()
     db.refresh(conn)
@@ -70,15 +107,28 @@ def soft_delete_connection(db: Session, conn: ContextVectorConnectionModel) -> N
 
 
 def test_connection(db: Session, conn: ContextVectorConnectionModel) -> tuple[bool, str]:
-    provider = conn.provider
     config = decrypt_config(conn.encrypted_config or {})
-    adapter = get_retrieval_adapter(provider, config)
-    ok, message = adapter.test_connection()
-    conn.last_tested_at = datetime.now(timezone.utc)
-    conn.last_error = None if ok else message
-    conn.status = "active" if ok else "invalid"
+    ok, message = test_connection_config(conn.provider, config)
+    _apply_test_result(conn, ok, message)
     db.add(conn)
     db.commit()
     db.refresh(conn)
     return ok, message
+
+
+def get_active_connection_for_owner(
+    db: Session, connection_id: UUID, owner: str
+) -> ContextVectorConnectionModel:
+    """Load a connection that belongs to this account and is usable on a context job."""
+    conn = get_connection(db, connection_id, owner)
+    if not conn:
+        raise ValueError("Vector connection not found for this account.")
+    if conn.status == "disabled":
+        raise ValueError("Vector connection has been removed.")
+    if conn.status != "active":
+        raise ValueError(
+            f"Vector connection is not active (status={conn.status!r}). "
+            "Re-test the connection before using it on a job."
+        )
+    return conn
 

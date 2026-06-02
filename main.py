@@ -14,6 +14,7 @@ from apis.routers.library import library_router
 from apis.routers.customer_support_chatbot import customer_support_chatbot_router
 from apis.routers.context_jobs import context_jobs_router
 from apis.routers.context_vector_connections import context_vector_connections_router
+from apis.routers.llm_provider_keys import provider_keys_router
 from admin.routes.kb_ingestion import kb_ingestion_router
 
 from admin.routes.permissions import permissioons_router
@@ -24,7 +25,9 @@ from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
 
 from admin.core.ingestion_job import ingest_job
-from context_jobs.orchestrator import start_mock_run_workers, stop_mock_run_workers
+from context_jobs.orchestrator import start_run_workers, stop_run_workers
+from context_jobs.tools.seed_registry import seed_tool_registry
+from database.database import SessionLocal
 
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
@@ -61,6 +64,16 @@ if not kb_logger.handlers:
     )
     kb_logger.addHandler(handler)
 kb_logger.setLevel(logging.INFO)
+
+ingestion_timing_logger = logging.getLogger("context_jobs.ingestion.timing")
+if not ingestion_timing_logger.handlers:
+    _ingest_timing_handler = logging.StreamHandler()
+    _ingest_timing_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    )
+    ingestion_timing_logger.addHandler(_ingest_timing_handler)
+ingestion_timing_logger.setLevel(logging.INFO)
+ingestion_timing_logger.propagate = False
 
 
 async def worker() -> None:
@@ -99,6 +112,12 @@ async def worker() -> None:
 async def lifespan(app: FastAPI):
     # Ensure tables exist (for dev environments); production should rely on migrations.
     create_db_tables()
+    try:
+        db = SessionLocal()
+        seed_tool_registry(db)
+        db.close()
+    except Exception:
+        kb_logger.exception("Failed to seed tool registry")
 
     _setup_cleanup_logging()
     # Start background user cleanup loop (soft deletes of long-expired, inactive users)
@@ -110,8 +129,8 @@ async def lifespan(app: FastAPI):
     app.state.job_queue = job_queue
     app.state.active_jobs = lambda: active_jobs
     kb_logger.info("Started 2 ingestion workers.")
-    start_mock_run_workers()
-    kb_logger.info("Started context jobs mock run workers.")
+    start_run_workers()
+    kb_logger.info("Started context jobs run workers.")
 
     try:
         yield
@@ -119,7 +138,7 @@ async def lifespan(app: FastAPI):
         for task in worker_tasks:
             task.cancel()
         await asyncio.gather(*worker_tasks, return_exceptions=True)
-        stop_mock_run_workers()
+        stop_run_workers()
         kb_logger.info("Shutdown: All ingestion workers cancelled.")
 
 
@@ -137,6 +156,7 @@ app.include_router(chat_router, tags=["Chat"])
 app.include_router(library_router, tags=["Library"])
 app.include_router(context_jobs_router, tags=["Context Jobs"])
 app.include_router(context_vector_connections_router, tags=["Context Jobs"])
+app.include_router(provider_keys_router, tags=["Context Jobs"])
 app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"])
 app.include_router(permissioons_router, tags=["Admin - Permission Management"])
 app.include_router(packages_router, tags=["Admin - Package Management"])

@@ -1,5 +1,5 @@
 from database import database
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, Numeric, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import uuid
@@ -37,6 +37,10 @@ class ContextJobModel(database.Base):
     owner = Column(String, nullable=True, default="current_user")
     approval_required = Column(Boolean, nullable=False, default=False)
     policy_profile = Column(String, nullable=True)
+    execution_provider = Column(String, nullable=False, default="openai")
+    execution_model = Column(String, nullable=True)
+    llm_key_id = Column(UUID(as_uuid=True), ForeignKey("llm_provider_keys.id"), nullable=True)
+    max_agent_turns = Column(Integer, nullable=False, default=10)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         TIMESTAMP(timezone=True),
@@ -95,4 +99,10 @@ class JobRunModel(database.Base):
     output_text = Column(Text, nullable=True)
     token_usage = Column(Integer, nullable=True)
     latency_ms = Column(Integer, nullable=True)
+    execution_provider = Column(String, nullable=True)
+    execution_model = Column(String, nullable=True)
+    total_provider_tokens = Column(Integer, nullable=False, default=0)
+    total_tool_calls = Column(Integer, nullable=False, default=0)
+    estimated_cost_usd = Column(Numeric(10, 6), nullable=False, default=0)
+    agent_turns = Column(Integer, nullable=False, default=0)
 

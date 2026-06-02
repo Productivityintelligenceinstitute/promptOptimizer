@@ -33,6 +33,10 @@ class ContextJobBase(BaseModel):
     owner: Optional[str] = None
     approval_required: bool = Field(False, alias="approvalRequired")
     policy_profile: Optional[str] = Field(None, alias="policyProfile")
+    execution_provider: str = Field("openai", alias="executionProvider")
+    execution_model: Optional[str] = Field(None, alias="executionModel")
+    llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
+    max_agent_turns: int = Field(10, alias="maxAgentTurns")
 
     class Config:
         populate_by_name = True
@@ -70,6 +74,10 @@ class ContextJobUpdate(BaseModel):
     owner: Optional[str] = None
     approval_required: Optional[bool] = Field(None, alias="approvalRequired")
     policy_profile: Optional[str] = Field(None, alias="policyProfile")
+    execution_provider: Optional[str] = Field(None, alias="executionProvider")
+    execution_model: Optional[str] = Field(None, alias="executionModel")
+    llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
+    max_agent_turns: Optional[int] = Field(None, alias="maxAgentTurns")
 
     class Config:
         populate_by_name = True
@@ -144,6 +152,12 @@ class JobRunOut(BaseModel):
     output_text: Optional[str] = Field(None, alias="outputText")
     token_usage: Optional[int] = Field(None, alias="tokenUsage")
     latency_ms: Optional[int] = Field(None, alias="latencyMs")
+    execution_provider: Optional[str] = Field(None, alias="executionProvider")
+    execution_model: Optional[str] = Field(None, alias="executionModel")
+    total_provider_tokens: Optional[int] = Field(None, alias="totalProviderTokens")
+    total_tool_calls: Optional[int] = Field(None, alias="totalToolCalls")
+    estimated_cost_usd: Optional[float] = Field(None, alias="estimatedCostUsd")
+    agent_turns: Optional[int] = Field(None, alias="agentTurns")
 
     class Config:
         from_attributes = True
@@ -164,4 +178,22 @@ class ContextJobsStatsOut(BaseModel):
     runCount: int
     assetCount: int
     passRate: int
+
+
+class IngestionDocument(BaseModel):
+    """Single document for ingestion."""
+
+    text: str
+    metadata: dict[str, Any] | None = None
+    id: str | None = None
+
+
+class IngestionRequest(BaseModel):
+    """Request payload for document ingestion."""
+
+    documents: list[IngestionDocument]
+    ingestion_config: dict[str, Any] | None = Field(None, alias="ingestionConfig")
+
+    class Config:
+        populate_by_name = True
 

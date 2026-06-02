@@ -1,11 +1,14 @@
 from uuid import UUID
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from context_jobs.auth import get_authenticated_user_id
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
+from context_jobs.ingestion.ingestion_service import ingest_documents
 
 
 context_jobs_router = APIRouter(prefix="/context-jobs")
@@ -16,8 +19,11 @@ context_jobs_router = APIRouter(prefix="/context-jobs")
     response_model=list[cj_schemas.ContextJobOut],
     tags=["Context Jobs"],
 )
-async def list_jobs(db: Session = Depends(database.get_db)):
-    return cj_services.list_jobs(db)
+async def list_jobs(
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    return cj_services.list_jobs(db, owner)
 
 
 @context_jobs_router.get(
@@ -25,8 +31,12 @@ async def list_jobs(db: Session = Depends(database.get_db)):
     response_model=cj_schemas.ContextJobOut,
     tags=["Context Jobs"],
 )
-async def get_job(job_id: UUID, db: Session = Depends(database.get_db)):
-    job = cj_services.get_job(db, job_id)
+async def get_job(
+    job_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    job = cj_services.get_job(db, job_id, owner)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return job
@@ -38,8 +48,15 @@ async def get_job(job_id: UUID, db: Session = Depends(database.get_db)):
     status_code=status.HTTP_201_CREATED,
     tags=["Context Jobs"],
 )
-async def create_job(payload: cj_schemas.ContextJobCreate, db: Session = Depends(database.get_db)):
-    return cj_services.create_job(db, payload)
+async def create_job(
+    payload: cj_schemas.ContextJobCreate,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    try:
+        return cj_services.create_job(db, owner, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @context_jobs_router.patch(
@@ -50,12 +67,16 @@ async def create_job(payload: cj_schemas.ContextJobCreate, db: Session = Depends
 async def update_job(
     job_id: UUID,
     payload: cj_schemas.ContextJobUpdate,
+    owner: str = Depends(get_authenticated_user_id),
     db: Session = Depends(database.get_db),
 ):
-    job = cj_services.get_job(db, job_id)
+    job = cj_services.get_job(db, job_id, owner)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return cj_services.update_job(db, job, payload)
+    try:
+        return cj_services.update_job(db, owner, job, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @context_jobs_router.post(
@@ -64,22 +85,30 @@ async def update_job(
     status_code=status.HTTP_201_CREATED,
     tags=["Context Jobs"],
 )
-async def duplicate_job(job_id: UUID, db: Session = Depends(database.get_db)):
-    job = cj_services.get_job(db, job_id)
+async def duplicate_job(
+    job_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    job = cj_services.get_job(db, job_id, owner)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return cj_services.duplicate_job(db, job)
+    return cj_services.duplicate_job(db, owner, job)
 
 
 @context_jobs_router.get(
     "/jobs/{job_id}/stats",
     tags=["Context Jobs"],
 )
-async def get_job_stats(job_id: UUID, db: Session = Depends(database.get_db)):
-    job = cj_services.get_job(db, job_id)
-    if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return cj_services.get_job_stats(db, job_id)
+async def get_job_stats(
+    job_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    try:
+        return cj_services.get_job_stats(db, owner, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @context_jobs_router.post(
@@ -91,15 +120,15 @@ async def get_job_stats(job_id: UUID, db: Session = Depends(database.get_db)):
 async def run_job(
     job_id: UUID,
     payload: cj_schemas.JobRunCreate,
+    owner: str = Depends(get_authenticated_user_id),
     db: Session = Depends(database.get_db),
 ):
-    job = cj_services.get_job(db, job_id)
-    if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     try:
-        return cj_services.create_run(db, job_id, payload)
+        return cj_services.create_run(db, owner, job_id, payload)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+        detail = str(exc)
+        code = status.HTTP_429_TOO_MANY_REQUESTS if "queue is full" in detail.lower() else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @context_jobs_router.get(
@@ -107,15 +136,20 @@ async def run_job(
     response_model=list[cj_schemas.JobRunOut],
     tags=["Context Jobs"],
 )
-async def list_runs(db: Session = Depends(database.get_db)):
-    return cj_services.list_runs(db)
+async def list_runs(
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    return cj_services.list_runs(db, owner)
 
 
 @context_jobs_router.get(
     "/runs/queue-status",
     tags=["Context Jobs"],
 )
-async def get_runs_queue_status():
+async def get_runs_queue_status(
+    owner: str = Depends(get_authenticated_user_id),
+):
     return cj_services.get_queue_status()
 
 
@@ -124,8 +158,12 @@ async def get_runs_queue_status():
     response_model=cj_schemas.JobRunOut,
     tags=["Context Jobs"],
 )
-async def get_run(run_id: UUID, db: Session = Depends(database.get_db)):
-    run = cj_services.get_run(db, run_id)
+async def get_run(
+    run_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    run = cj_services.get_run(db, run_id, owner)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
@@ -139,9 +177,10 @@ async def get_run(run_id: UUID, db: Session = Depends(database.get_db)):
 async def record_run_decision(
     run_id: UUID,
     payload: cj_schemas.RunDecisionRequest,
+    owner: str = Depends(get_authenticated_user_id),
     db: Session = Depends(database.get_db),
 ):
-    run = cj_services.get_run(db, run_id)
+    run = cj_services.get_run(db, run_id, owner)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     if run.state not in {"completed", "failed", "escalated", "repair"}:
@@ -150,9 +189,9 @@ async def record_run_decision(
             detail="Cannot record a decision on a run that is still in progress",
         )
     try:
-        return cj_services.record_human_decision(db, run, payload)
+        return cj_services.record_human_decision(db, owner, run, payload)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @context_jobs_router.get(
@@ -160,7 +199,10 @@ async def record_run_decision(
     response_model=list[cj_schemas.ContextAssetOut],
     tags=["Context Jobs"],
 )
-async def list_assets(db: Session = Depends(database.get_db)):
+async def list_assets(
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
     return cj_services.list_assets(db)
 
 
@@ -170,7 +212,11 @@ async def list_assets(db: Session = Depends(database.get_db)):
     status_code=status.HTTP_201_CREATED,
     tags=["Context Jobs"],
 )
-async def create_asset(payload: cj_schemas.ContextAssetCreate, db: Session = Depends(database.get_db)):
+async def create_asset(
+    payload: cj_schemas.ContextAssetCreate,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
     return cj_services.create_asset(db, payload)
 
 
@@ -182,6 +228,7 @@ async def create_asset(payload: cj_schemas.ContextAssetCreate, db: Session = Dep
 async def update_asset(
     asset_id: UUID,
     payload: cj_schemas.ContextAssetUpdate,
+    owner: str = Depends(get_authenticated_user_id),
     db: Session = Depends(database.get_db),
 ):
     asset = cj_services.get_asset(db, asset_id)
@@ -195,7 +242,11 @@ async def update_asset(
     status_code=status.HTTP_204_NO_CONTENT,
     tags=["Context Jobs"],
 )
-async def delete_asset(asset_id: UUID, db: Session = Depends(database.get_db)):
+async def delete_asset(
+    asset_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
     asset = cj_services.get_asset(db, asset_id)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
@@ -208,6 +259,48 @@ async def delete_asset(asset_id: UUID, db: Session = Depends(database.get_db)):
     response_model=cj_schemas.ContextJobsStatsOut,
     tags=["Context Jobs"],
 )
-async def get_context_jobs_stats(db: Session = Depends(database.get_db)):
-    return cj_services.get_overall_stats(db)
+async def get_context_jobs_stats(
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    return cj_services.get_overall_stats(db, owner)
 
+
+@context_jobs_router.post(
+    "/jobs/{job_id}/ingest",
+    response_model=dict[str, Any],
+    tags=["Context Jobs"],
+)
+async def ingest_into_job(
+    job_id: UUID,
+    payload: cj_schemas.IngestionRequest,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    job = cj_services.get_job(db, job_id, owner)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    try:
+        doc_payloads = [d.model_dump() for d in payload.documents]
+        result = ingest_documents(
+            job=job,
+            documents=doc_payloads,
+            db=db,
+            ingestion_config=payload.ingestion_config,
+        )
+
+        if result.status in {"escalated", "blocked_by_policy"}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=result.to_dict())
+        if result.status in ("failed", "repair"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.to_dict())
+
+        return result.to_dict()
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": f"Ingestion failed: {exc}"},
+        ) from exc

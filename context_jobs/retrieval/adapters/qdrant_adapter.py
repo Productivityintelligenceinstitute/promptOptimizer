@@ -1,26 +1,71 @@
+from __future__ import annotations
+
 from typing import Any
 
 from qdrant_client import QdrantClient
-from qdrant_client.http import models as qmodels
+from qdrant_client.models import Distance, PointStruct, VectorParams
 
+from context_jobs.embeddings import embed_query
+from context_jobs.ingestion.records import ensure_record_ids, qdrant_point_id
+from context_jobs.ingestion.types import UpsertResult
 from context_jobs.retrieval.base import NormalizedMatch
-from utils.utils import embed
+from core.config import EMBED_MODEL
 
 
 class QdrantAdapter:
     provider = "qdrant"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        self.url = config.get("url")
-        self.api_key = config.get("api_key")
-        self.collection_name = config.get("collection_name")
-        self.embedding_model = config.get("embedding_model")
-        self.vector_name = config.get("vector_name")
+        self.config = dict(config) if config else {}
+        self.url = self.config.get("url")
+        self.api_key = self.config.get("api_key")
+        self.collection_name = self.config.get("collection_name")
+        self.embedding_model = self.config.get("embedding_model") or EMBED_MODEL
+        self.vector_name = self.config.get("vector_name")
 
         if not self.url or not self.collection_name:
             raise ValueError("External Qdrant config requires url and collection_name.")
 
         self.client = QdrantClient(url=self.url, api_key=self.api_key)
+
+    def _resolve_vector_name(self) -> str | None:
+        info = self.client.get_collection(self.collection_name)
+        params = getattr(getattr(info, "config", None), "params", None)
+        vectors = getattr(params, "vectors", None)
+        sparse_vectors = getattr(params, "sparse_vectors", None)
+
+        if sparse_vectors:
+            raise ValueError(
+                "Qdrant collection uses sparse vectors. This integration currently supports only "
+                "dense vectors."
+            )
+
+        if isinstance(vectors, dict):
+            vector_names = list(vectors.keys())
+            if self.vector_name:
+                if self.vector_name not in vector_names:
+                    raise ValueError(
+                        f"Qdrant vector_name '{self.vector_name}' not found in collection. "
+                        f"Available vector names: {vector_names}"
+                    )
+                return self.vector_name
+
+            if len(vector_names) == 1:
+                # Auto-detect single named dense vector.
+                return vector_names[0]
+
+            raise ValueError(
+                "Qdrant collection has multiple named dense vectors. "
+                f"Provide config.vector_name. Available vector names: {vector_names}"
+            )
+
+        if self.vector_name:
+            raise ValueError(
+                "config.vector_name was provided, but this Qdrant collection uses a single unnamed dense vector. "
+                "Remove vector_name from config."
+            )
+
+        return None
 
     def search(
         self,
@@ -28,27 +73,21 @@ class QdrantAdapter:
         top_k: int = 8,
         filters: dict[str, Any] | None = None,
     ) -> list[NormalizedMatch]:
-        query_vec = embed(query_text, model=self.embedding_model)
-
-        query_filter = None
-        if isinstance(filters, dict) and filters:
-            try:
-                query_filter = qmodels.Filter(**filters)
-            except Exception:
-                # Keep external caller flexibility; ignore malformed filter payloads.
-                query_filter = None
-
-        search_kwargs: dict[str, Any] = {
-            "collection_name": self.collection_name,
-            "query_vector": query_vec,
-            "limit": top_k,
-            "with_payload": True,
-            "query_filter": query_filter,
-        }
-        if self.vector_name:
-            search_kwargs["using"] = self.vector_name
-
-        points = self.client.search(**search_kwargs)
+        # Dense-only retrieval path. filters argument kept for interface compatibility.
+        _ = filters
+        query_vec = embed_query(query_text, self.config)
+        using_vector = self._resolve_vector_name()
+        try:
+            points = self._execute_dense_query(query_vec, top_k, using_vector)
+        except Exception as exc:
+            message = str(exc)
+            if "dimension" in message.lower():
+                raise ValueError(
+                    "Qdrant query failed due to vector dimension mismatch. "
+                    "Use a collection dimension that matches your embedding model output "
+                    f"(model='{self.embedding_model}'). Raw error: {message}"
+                ) from exc
+            raise ValueError(f"Qdrant query failed: {message}") from exc
 
         normalized: list[NormalizedMatch] = []
         for p in points or []:
@@ -70,12 +109,99 @@ class QdrantAdapter:
             )
         return normalized
 
+    def _execute_dense_query(
+        self, query_vec: list[float], top_k: int, using_vector: str | None
+    ) -> list[Any]:
+        # qdrant-client API varies by version:
+        # - older: client.search(...)
+        # - newer: client.query_points(...)
+        if hasattr(self.client, "search"):
+            search_kwargs: dict[str, Any] = {
+                "collection_name": self.collection_name,
+                "query_vector": query_vec,
+                "limit": top_k,
+                "with_payload": True,
+            }
+            if using_vector:
+                search_kwargs["using"] = using_vector
+            return self.client.search(**search_kwargs)
+
+        if hasattr(self.client, "query_points"):
+            query_kwargs: dict[str, Any] = {
+                "collection_name": self.collection_name,
+                "query": query_vec,
+                "limit": top_k,
+                "with_payload": True,
+            }
+            if using_vector:
+                query_kwargs["using"] = using_vector
+            result = self.client.query_points(**query_kwargs)
+            return getattr(result, "points", None) or []
+
+        raise ValueError(
+            "Unsupported qdrant-client version: missing both 'search' and 'query_points'. "
+            "Install a compatible qdrant-client release."
+        )
+
     def test_connection(self) -> tuple[bool, str]:
         try:
             if not self.client.collection_exists(collection_name=self.collection_name):
                 return False, f"Qdrant collection '{self.collection_name}' does not exist."
+            _ = self._resolve_vector_name()
+
             _ = self.search("test connection", top_k=1)
             return True, "Qdrant connection test successful."
         except Exception as exc:
             return False, f"Qdrant connection failed: {exc}"
+
+    def target_exists(self) -> bool:
+        try:
+            return bool(self.client.collection_exists(collection_name=self.collection_name))
+        except Exception:
+            return False
+
+    def ensure_target(self, vector_dim: int, distance: str = "Cosine", **kwargs: Any) -> tuple[bool, str]:
+        _ = kwargs
+        if self.target_exists():
+            return True, f"Qdrant collection '{self.collection_name}' already exists."
+        distance_map = {
+            "cosine": Distance.COSINE,
+            "euclid": Distance.EUCLID,
+            "euclidean": Distance.EUCLID,
+            "dot": Distance.DOT,
+            "manhattan": Distance.MANHATTAN,
+        }
+        dist_enum = distance_map.get(distance.lower(), Distance.COSINE)
+        try:
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(size=vector_dim, distance=dist_enum),
+            )
+            return True, f"Created Qdrant collection '{self.collection_name}' ({vector_dim}-dim)."
+        except Exception as exc:
+            return False, f"Failed to create Qdrant collection: {exc}"
+
+    def upsert(self, records: list[dict[str, Any]], batch_size: int = 100) -> UpsertResult:
+        ensure_record_ids(records)
+        upserted = 0
+        try:
+            for i in range(0, len(records), batch_size):
+                structs = [
+                    PointStruct(
+                        id=qdrant_point_id(r["id"]),
+                        vector=r["values"],
+                        payload=r.get("metadata") or {},
+                    )
+                    for r in records[i : i + batch_size]
+                ]
+                self.client.upsert(collection_name=self.collection_name, points=structs)
+                upserted += len(structs)
+            return UpsertResult(success=True, upserted_count=upserted)
+        except Exception as exc:
+            return UpsertResult(
+                success=False,
+                upserted_count=upserted,
+                failed_count=len(records) - upserted,
+                error=f"Qdrant upsert failed: {exc}",
+            )
 

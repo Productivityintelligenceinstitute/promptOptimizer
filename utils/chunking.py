@@ -19,6 +19,13 @@ def chunk_text(text: str, max_chars=1000, overlap=150):
         if chunk:
             chunks.append(chunk)
 
-        start = end - overlap
+        if end >= len(text):
+            break
+
+        next_start = end - overlap
+        # Avoid infinite loop when remainder fits in one window (end - overlap <= start).
+        if next_start <= start:
+            break
+        start = next_start
 
     return chunks
