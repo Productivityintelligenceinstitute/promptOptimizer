@@ -15,7 +15,10 @@ from context_jobs.tools.base import BaseTool
 class CodeExecutorTool(BaseTool):
     id = "code-exec"
     name = "Code Executor"
-    description = "Execute Python code in an isolated Docker sandbox and return stdout/stderr."
+    description = (
+        "Execute Python 3 code in an isolated Docker sandbox and return stdout/stderr. "
+        "Only Python is supported; dependencies are limited to those preinstalled in the sandbox image."
+    )
     input_schema = {
         "type": "object",
         "properties": {

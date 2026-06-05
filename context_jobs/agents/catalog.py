@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from context_jobs.agents.execution_modes import EXECUTION_MODE_MULTI, normalize_execution_mode
 from context_jobs.agents.types import SubAgentDefinition
 from schemas.context_jobs_model import ContextJobModel
 
@@ -66,8 +67,8 @@ SPECIALIST_BLUEPRINTS: dict[str, dict] = {
 
 
 def is_multi_agent_mode(job: ContextJobModel) -> bool:
-    mode = (getattr(job, "execution_mode", None) or "single_agent").lower()
-    return mode == "provider_multi_agent"
+    mode = normalize_execution_mode(getattr(job, "execution_mode", None))
+    return mode == EXECUTION_MODE_MULTI
 
 
 def _enabled_tool_ids(job: ContextJobModel) -> set[str]:
@@ -132,6 +133,18 @@ def build_delegate_tool_schema(catalog: dict[str, SubAgentDefinition]) -> dict:
         },
         "required": ["agent_name", "task"],
     }
+
+
+def list_specialist_catalog(job: ContextJobModel) -> list[dict]:
+    return [
+        {
+            "name": spec.name,
+            "description": spec.description,
+            "toolIds": list(spec.tool_ids),
+            "maxTurns": spec.max_turns,
+        }
+        for spec in compile_agent_catalog(job).values()
+    ]
 
 
 def build_delegate_tool_definition(catalog: dict[str, SubAgentDefinition]):

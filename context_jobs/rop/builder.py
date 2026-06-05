@@ -162,6 +162,7 @@ def build_run_output_package(
             "environment": os.environ.get("ENVIRONMENT", "development"),
             "approvalState": "pending" if job.approval_required else "not_required",
             "policyProfile": job.policy_profile,
+            "executionMode": getattr(job, "execution_mode", "single_agent"),
         },
         "artifacts": list(getattr(tool_executor, "artifacts", []) or []),
     }

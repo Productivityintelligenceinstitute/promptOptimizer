@@ -182,6 +182,35 @@ class ContextJobsStatsOut(BaseModel):
     passRate: int
 
 
+class RunArtifactOut(BaseModel):
+    path: str
+    size_bytes: Optional[int] = Field(None, alias="sizeBytes")
+    mime_type: Optional[str] = Field(None, alias="mimeType")
+    tool_id: Optional[str] = Field(None, alias="toolId")
+
+    class Config:
+        populate_by_name = True
+
+
+class RunArtifactsOut(BaseModel):
+    runId: UUID
+    artifacts: list[RunArtifactOut]
+
+
+class SpecialistAgentOut(BaseModel):
+    name: str
+    description: str
+    toolIds: list[str] = Field(..., alias="toolIds")
+    maxTurns: int = Field(..., alias="maxTurns")
+
+    class Config:
+        populate_by_name = True
+
+
+class ExecutionModesOut(BaseModel):
+    modes: list[dict[str, str]]
+
+
 class IngestionDocument(BaseModel):
     """Single document for ingestion."""
 

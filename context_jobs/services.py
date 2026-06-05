@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from context_jobs import schemas as cj_schemas
+from context_jobs.agents.execution_modes import normalize_execution_mode
 from context_jobs.managed_jet_kb import ensure_managed_namespace
 from context_jobs.orchestrator import enqueue_mock_run, get_mock_queue_status
 from context_jobs.provider_key_services import resolve_llm_api_key
@@ -65,8 +66,14 @@ def get_job(db: Session, job_id: UUID, owner: str) -> Optional[ContextJobModel]:
     )
 
 
+def _normalize_job_payload(payload: dict) -> dict:
+    if "execution_mode" in payload and payload["execution_mode"] is not None:
+        payload["execution_mode"] = normalize_execution_mode(payload["execution_mode"])
+    return payload
+
+
 def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> ContextJobModel:
-    payload = data.model_dump(by_alias=False)
+    payload = _normalize_job_payload(data.model_dump(by_alias=False))
     payload["owner"] = owner
     check = cj_schemas.ContextJobCreate(**payload)
     _validate_job_vector_connection(db, check, owner)
@@ -85,7 +92,7 @@ def update_job(
     job: ContextJobModel,
     data: cj_schemas.ContextJobUpdate,
 ) -> ContextJobModel:
-    payload = data.model_dump(exclude_unset=True, by_alias=False)
+    payload = _normalize_job_payload(data.model_dump(exclude_unset=True, by_alias=False))
     merged_mode = payload.get("retrieval_mode", job.retrieval_mode)
     merged_conn = payload.get("vector_connection_id", job.vector_connection_id)
     merged_key = payload.get("llm_key_id", job.llm_key_id)
@@ -227,6 +234,7 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
         execution_model=job.execution_model,
         llm_key_id=job.llm_key_id,
         max_agent_turns=job.max_agent_turns,
+        execution_mode=job.execution_mode,
         version=1,
         owner=owner,
         approval_required=job.approval_required,

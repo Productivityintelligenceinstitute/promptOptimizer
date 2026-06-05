@@ -1,6 +1,6 @@
 ---
 name: Backend Implementation Plan
-overview: Complete backend implementation plan for Jet Prompt Optimizer Context Jobs — covering provider-native orchestration (Option B), BYOK + Jet-managed key storage, Guardrail Gateway, all 5 tool implementations, enhanced validation engine, memory system, context assembly pipeline, and Firebase auth integration. This document serves as a standalone handoff reference.
+overview: Complete backend implementation plan for Jet Prompt Optimizer Context Jobs — covering provider-native orchestration (Option B), BYOK + Jet-managed key storage, Guardrail Gateway, 7 tool implementations (incl. file-write, docx-generate), provider multi-agent delegation (opt-in), enhanced validation engine, memory system, context assembly pipeline, and Firebase auth integration. This document serves as a standalone handoff reference.
 todos:
   - id: phase-1-foundation
     content: "Phase 1: ORM model updates/table creation, BYOK encryption, key management API, Firebase auth on all endpoints"
@@ -47,7 +47,7 @@ This plan covers everything remaining to turn the current FastAPI backend into t
 - BYOK encrypted key storage + Jet-managed keys
 - Provider-native agent loops with tool-use
 - Guardrail Gateway (tool allowlist, budget, audit)
-- All 5 tool implementations (web-search, doc-reader, calculator, code-exec, api-caller)
+- All 7 tool implementations (web-search, doc-reader, calculator, code-exec, api-caller, file-write, docx-generate)
 - Enhanced validation engine (pluggable checkers, LLM-as-judge)
 - Memory system (session, project, user profile)
 - Full context assembly pipeline (query rewrite, hybrid retrieval, reranking)
@@ -1742,7 +1742,7 @@ Testing details for this module (unit tests, integration tests, and contract tes
 
 ### Phase 3: Tools + Guardrail Gateway
 - Tool base interface
-- All 5 tool implementations (web-search, doc-reader, calculator, code-exec, api-caller)
+- All 7 tool implementations (web-search, doc-reader, calculator, code-exec, api-caller, file-write, docx-generate)
 - Tool registry seeding
 - Guardrail Gateway (allowlist, budget, sanitization, logging)
 - Tool execution audit table writes
@@ -1867,6 +1867,8 @@ Jet does **not** add quotas, mandates, or prohibitions on delegation.
 | Prompt guidance | `context_jobs/assembly/prompt_builder.py` |
 | ROP artifacts | `context_jobs/rop/builder.py` |
 | Registry seed | `context_jobs/tools/seed_registry.py` |
+| Artifact APIs | `apis/routers/context_jobs.py` (`GET /runs/{id}/artifacts`, download) |
+| Schema bootstrap | `context_jobs/schema_bootstrap.py` (dev `execution_mode` column) |
 
 ### 21.7 Env Vars
 

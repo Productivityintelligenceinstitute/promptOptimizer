@@ -26,6 +26,7 @@ from admin.routes.users import users_admin_router
 
 from admin.core.ingestion_job import ingest_job
 from context_jobs.orchestrator import start_run_workers, stop_run_workers
+from context_jobs.schema_bootstrap import ensure_context_jobs_columns
 from context_jobs.tools.seed_registry import seed_tool_registry
 from database.database import SessionLocal
 
@@ -112,6 +113,7 @@ async def worker() -> None:
 async def lifespan(app: FastAPI):
     # Ensure tables exist (for dev environments); production should rely on migrations.
     create_db_tables()
+    ensure_context_jobs_columns()
     try:
         db = SessionLocal()
         seed_tool_registry(db)

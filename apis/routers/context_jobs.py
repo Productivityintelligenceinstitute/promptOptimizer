@@ -1,9 +1,18 @@
+import mimetypes
 from uuid import UUID
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from context_jobs.agents.catalog import list_specialist_catalog
+from context_jobs.agents.execution_modes import (
+    EXECUTION_MODE_MULTI,
+    EXECUTION_MODE_SINGLE,
+    VALID_EXECUTION_MODES,
+)
+from context_jobs.artifacts import merge_rop_and_disk_artifacts, resolve_download_artifact
 from context_jobs.auth import get_authenticated_user_id
 from database import database
 from context_jobs import schemas as cj_schemas
@@ -97,6 +106,42 @@ async def duplicate_job(
 
 
 @context_jobs_router.get(
+    "/execution-modes",
+    response_model=cj_schemas.ExecutionModesOut,
+    tags=["Context Jobs"],
+)
+async def list_execution_modes(
+    owner: str = Depends(get_authenticated_user_id),
+):
+    labels = {
+        EXECUTION_MODE_SINGLE: "Single agent (default)",
+        EXECUTION_MODE_MULTI: "Provider multi-agent (opt-in delegation)",
+    }
+    return {
+        "modes": [
+            {"value": mode, "label": labels.get(mode, mode)}
+            for mode in sorted(VALID_EXECUTION_MODES)
+        ]
+    }
+
+
+@context_jobs_router.get(
+    "/jobs/{job_id}/specialists",
+    response_model=list[cj_schemas.SpecialistAgentOut],
+    tags=["Context Jobs"],
+)
+async def list_job_specialists(
+    job_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    job = cj_services.get_job(db, job_id, owner)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return list_specialist_catalog(job)
+
+
+@context_jobs_router.get(
     "/jobs/{job_id}/stats",
     tags=["Context Jobs"],
 )
@@ -167,6 +212,46 @@ async def get_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@context_jobs_router.get(
+    "/runs/{run_id}/artifacts",
+    response_model=cj_schemas.RunArtifactsOut,
+    tags=["Context Jobs"],
+)
+async def list_run_artifacts(
+    run_id: UUID,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    run = cj_services.get_run(db, run_id, owner)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return {
+        "runId": run.id,
+        "artifacts": merge_rop_and_disk_artifacts(owner, run),
+    }
+
+
+@context_jobs_router.get(
+    "/runs/{run_id}/artifacts/{artifact_path:path}",
+    tags=["Context Jobs"],
+)
+async def download_run_artifact(
+    run_id: UUID,
+    artifact_path: str,
+    owner: str = Depends(get_authenticated_user_id),
+    db: Session = Depends(database.get_db),
+):
+    run = cj_services.get_run(db, run_id, owner)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    try:
+        target = resolve_download_artifact(owner, run, artifact_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(path=target, filename=target.name, media_type=media_type)
 
 
 @context_jobs_router.patch(
