@@ -8,6 +8,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from context_jobs.agents.catalog import build_delegate_tool_definition, compile_agent_catalog, is_multi_agent_mode
+from context_jobs.agents.delegate_runner import AgentDelegateRunner
 from context_jobs.assembly.memory_loader import load_memory_context
 from context_jobs.assembly.prompt_builder import assemble_user_message, build_system_prompt
 from context_jobs.assembly.retrieval_pipeline import execute_retrieval
@@ -52,6 +54,10 @@ async def _execute_run_async(run_id: UUID) -> None:
             system_prompt = build_system_prompt(job)
             memory_context = load_memory_context(job.owner, job.id, job.memory_config, db)
             tools = resolve_tools(job.tool_permissions, db)
+            agent_catalog = compile_agent_catalog(job)
+            delegate_tool = build_delegate_tool_definition(agent_catalog)
+            if delegate_tool:
+                tools = tools + [delegate_tool]
             _complete_stage(db, run)
 
             await _run_stage(db, run, "retrieving", "Executing retrieval pipeline")
@@ -82,11 +88,27 @@ async def _execute_run_async(run_id: UUID) -> None:
                 model=model,
                 metadata={"job_id": str(job.id), "run_id": str(run.id), "owner": job.owner},
             )
+            delegate_runner = None
+            if is_multi_agent_mode(job) and agent_catalog:
+                delegate_runner = AgentDelegateRunner(
+                    job=job,
+                    run=run,
+                    db=db,
+                    budget_tracker=budget_tracker,
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                    catalog=agent_catalog,
+                    base_tool_definitions=resolve_tools(job.tool_permissions, db),
+                )
             tool_executor = GatewayToolExecutor(
                 job=job,
                 run=run,
                 budget_tracker=budget_tracker,
                 db=db,
+                agent_catalog=agent_catalog,
+                delegate_runner=delegate_runner,
+                allow_delegation=bool(delegate_runner),
             )
             adapter = get_provider_adapter(provider)
             response = await adapter.execute(envelope, api_key, tool_executor)
@@ -100,6 +122,10 @@ async def _execute_run_async(run_id: UUID) -> None:
             run.agent_turns = response.agent_turns
             run.token_usage = run.total_provider_tokens
             run.tool_events = tool_executor.executed_calls
+            if delegate_runner and delegate_runner.delegation_events:
+                run.tool_events = (run.tool_events or []) + [
+                    {"type": "delegation", **event} for event in delegate_runner.delegation_events
+                ]
             run.estimated_cost_usd = budget_tracker.cost_usd
             db.add(run)
             db.commit()

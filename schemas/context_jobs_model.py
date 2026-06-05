@@ -41,6 +41,7 @@ class ContextJobModel(database.Base):
     execution_model = Column(String, nullable=True)
     llm_key_id = Column(UUID(as_uuid=True), ForeignKey("llm_provider_keys.id"), nullable=True)
     max_agent_turns = Column(Integer, nullable=False, default=10)
+    execution_mode = Column(String, nullable=False, default="single_agent")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         TIMESTAMP(timezone=True),

@@ -37,6 +37,7 @@ class ContextJobBase(BaseModel):
     execution_model: Optional[str] = Field(None, alias="executionModel")
     llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
     max_agent_turns: int = Field(10, alias="maxAgentTurns")
+    execution_mode: str = Field("single_agent", alias="executionMode")
 
     class Config:
         populate_by_name = True
@@ -78,6 +79,7 @@ class ContextJobUpdate(BaseModel):
     execution_model: Optional[str] = Field(None, alias="executionModel")
     llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
     max_agent_turns: Optional[int] = Field(None, alias="maxAgentTurns")
+    execution_mode: Optional[str] = Field(None, alias="executionMode")
 
     class Config:
         populate_by_name = True

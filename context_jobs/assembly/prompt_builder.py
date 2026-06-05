@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from context_jobs.agents.catalog import is_multi_agent_mode
 from schemas.context_jobs_model import ContextJobModel
 
 
@@ -56,7 +57,21 @@ def build_system_prompt(job: ContextJobModel) -> str:
     sections.append(
         "Citation format: when citing retrieved context, use [source:{name}] where possible."
     )
+    if is_multi_agent_mode(job):
+        sections.append(_multi_agent_orchestration_guidance())
     return "\n\n".join(sections)
+
+
+def _multi_agent_orchestration_guidance() -> str:
+    return (
+        "## Execution Options\n"
+        "You have direct tools and optional specialist agents via delegate-to-agent.\n"
+        "Choose the simplest approach that fits the task:\n"
+        "- Use direct tool calls when a single or few tool invocations are sufficient.\n"
+        "- Delegate to a specialist only when isolated context, parallel depth, or role focus "
+        "would materially improve the result.\n"
+        "There is no requirement to delegate; efficiency and correctness come first."
+    )
 
 
 def assemble_user_message(user_request: str, rag_context: str, memory_context: str) -> str:

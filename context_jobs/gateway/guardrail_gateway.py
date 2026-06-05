@@ -9,12 +9,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from context_jobs.agents.catalog import DELEGATE_TOOL_ID
+from context_jobs.agents.types import SubAgentDefinition
 from context_jobs.gateway.budget_tracker import BudgetTracker
 from context_jobs.provider_key_services import resolve_tool_api_key
 from context_jobs.providers.base import ToolCall, ToolResult
 from context_jobs.tools import get_tool_implementation
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 from schemas.tool_execution_model import ToolExecutionModel
+
+_WRITE_TOOL_IDS = {"file-write", "docx-generate", DELEGATE_TOOL_ID}
+_RUN_CONTEXT_TOOL_IDS = {"file-write", "docx-generate"}
 
 
 _LOCALHOST_PATTERN = re.compile(r"^(localhost|127\.0\.0\.1|0\.0\.0\.0)$", re.I)
@@ -26,7 +31,11 @@ class GatewayToolExecutor:
     run: JobRunModel
     budget_tracker: BudgetTracker
     db: Session
+    agent_catalog: dict[str, SubAgentDefinition] = field(default_factory=dict)
+    delegate_runner: Any | None = None
+    allow_delegation: bool = False
     executed_calls: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
     turns: int = 0
 
     @property
@@ -61,11 +70,23 @@ class GatewayToolExecutor:
             )
 
         try:
-            tool_impl = get_tool_implementation(tool_call.tool_id)
-            tool_api_key = None
-            if tool_impl.requires_external_key:
-                tool_api_key = resolve_tool_api_key(self.db, self.job.owner, tool_call.tool_id)
-            result_text = await tool_impl.execute(sanitized_args, api_key=tool_api_key)
+            if tool_call.tool_id == DELEGATE_TOOL_ID:
+                result_text = await self._execute_delegation(sanitized_args)
+            else:
+                tool_impl = get_tool_implementation(tool_call.tool_id)
+                tool_api_key = None
+                if tool_impl.requires_external_key:
+                    tool_api_key = resolve_tool_api_key(self.db, self.job.owner, tool_call.tool_id)
+                if tool_call.tool_id in _RUN_CONTEXT_TOOL_IDS:
+                    result_text = await tool_impl.execute(
+                        sanitized_args,
+                        api_key=tool_api_key,
+                        owner=self.job.owner,
+                        run_id=str(self.run.id),
+                    )
+                else:
+                    result_text = await tool_impl.execute(sanitized_args, api_key=tool_api_key)
+                self._maybe_record_artifact(tool_call.tool_id, sanitized_args, result_text)
             self.budget_tracker.record_tool_call()
             self._log_execution(tool_call, sanitized_args, result_text, "success", None)
             self.executed_calls.append(
@@ -105,7 +126,37 @@ class GatewayToolExecutor:
         )
         return ToolResult(tool_call_id=tool_call.id, content=f"{code}: {reason}", is_error=True)
 
+    async def _execute_delegation(self, arguments: dict[str, Any]) -> str:
+        if not self.allow_delegation or not self.delegate_runner:
+            raise ValueError("Agent delegation is not enabled for this run")
+        agent_name = str(arguments.get("agent_name", "")).strip()
+        task = str(arguments.get("task", "")).strip()
+        if not agent_name or not task:
+            raise ValueError("agent_name and task are required for delegation")
+        return await self.delegate_runner.delegate(agent_name, task, self)
+
+    def _maybe_record_artifact(
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+        result_text: str,
+    ) -> None:
+        if tool_id not in _RUN_CONTEXT_TOOL_IDS:
+            return
+        rel_path = str(arguments.get("path", "")).strip()
+        if not rel_path:
+            return
+        self.artifacts.append(
+            {
+                "path": rel_path,
+                "toolId": tool_id,
+                "message": (result_text or "")[:500],
+            }
+        )
+
     def _is_tool_allowed(self, tool_id: str) -> bool:
+        if tool_id == DELEGATE_TOOL_ID:
+            return self.allow_delegation and bool(self.agent_catalog)
         perms = self.job.tool_permissions or []
         for perm in perms:
             if not isinstance(perm, dict):
@@ -122,6 +173,8 @@ class GatewayToolExecutor:
         return {}
 
     def _is_write_action(self, tool_call: ToolCall) -> bool:
+        if tool_call.tool_id in _WRITE_TOOL_IDS:
+            return True
         method = (tool_call.arguments or {}).get("method", "GET")
         return str(method).upper() in {"POST", "PUT", "PATCH", "DELETE"}
 

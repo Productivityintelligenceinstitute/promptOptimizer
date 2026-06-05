@@ -350,6 +350,10 @@ async def get_current_user(
 
 @accounts_router.post("/login-account")
 async def login_account(account: user_models.LoginAccount, db: Session = Depends(database.get_db)):
+    """
+    Legacy DB lookup by email only — does not verify Firebase password.
+    Prefer Firebase sign-in + GET /me. Real auth uses Bearer Firebase ID tokens.
+    """
     try:
         user = (
             db.query(UserModel)
@@ -363,14 +367,23 @@ async def login_account(account: user_models.LoginAccount, db: Session = Depends
         if not user or not user.email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email."
+                detail="Invalid email.",
             )
-        
+
         return {"detail": f"Login successful for, {user.full_name} with user id {user.id}."}
-    except Exception as e:
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error("Database error during login-account: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to login."
+            detail="Failed to login.",
+        )
+    except Exception as e:
+        logger.error("Unexpected error during login-account: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to login.",
         )
 
 @accounts_router.delete("/delete-account/{user_id}")

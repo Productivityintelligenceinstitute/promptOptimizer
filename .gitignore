@@ -3,6 +3,7 @@
 myenv
 venv
 uploaded_kb
+data/run-artifacts/
 
 __pycache__
 

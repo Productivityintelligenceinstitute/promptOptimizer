@@ -7,6 +7,8 @@ from context_jobs.tools.base import BaseTool
 from context_jobs.tools.calculator import CalculatorTool
 from context_jobs.tools.code_executor import CodeExecutorTool
 from context_jobs.tools.doc_reader import DocReaderTool
+from context_jobs.tools.docx_generate import DocxGenerateTool
+from context_jobs.tools.file_write import FileWriteTool
 from context_jobs.tools.web_search import WebSearchTool
 
 TOOL_IMPLEMENTATIONS: dict[str, BaseTool] = {
@@ -15,6 +17,8 @@ TOOL_IMPLEMENTATIONS: dict[str, BaseTool] = {
     "calculator": CalculatorTool(),
     "code-exec": CodeExecutorTool(),
     "api-caller": ApiCallerTool(),
+    "file-write": FileWriteTool(),
+    "docx-generate": DocxGenerateTool(),
 }
 
 

@@ -163,4 +163,5 @@ def build_run_output_package(
             "approvalState": "pending" if job.approval_required else "not_required",
             "policyProfile": job.policy_profile,
         },
+        "artifacts": list(getattr(tool_executor, "artifacts", []) or []),
     }
