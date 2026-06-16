@@ -37,7 +37,7 @@ class OpenAIAdapter(ProviderAdapter):
         api_key: str,
         tool_executor: ToolExecutor,
     ) -> ProviderResponse:
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.AsyncOpenAI(api_key=api_key)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": envelope.system_prompt},
             {"role": "user", "content": envelope.user_message},
@@ -58,7 +58,7 @@ class OpenAIAdapter(ProviderAdapter):
             if native_tools:
                 kwargs["tools"] = native_tools
 
-            response = client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
             if response.usage:
                 total_input += response.usage.prompt_tokens or 0
                 total_output += response.usage.completion_tokens or 0

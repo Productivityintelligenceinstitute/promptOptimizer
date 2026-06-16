@@ -34,7 +34,7 @@ class ClaudeAdapter(ProviderAdapter):
         api_key: str,
         tool_executor: ToolExecutor,
     ) -> ProviderResponse:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.AsyncAnthropic(api_key=api_key)
         messages: list[dict[str, Any]] = [{"role": "user", "content": envelope.user_message}]
         total_input = 0
         total_output = 0
@@ -53,7 +53,7 @@ class ClaudeAdapter(ProviderAdapter):
             if native_tools:
                 kwargs["tools"] = native_tools
 
-            response = client.messages.create(**kwargs)
+            response = await client.messages.create(**kwargs)
             total_input += response.usage.input_tokens
             total_output += response.usage.output_tokens
 

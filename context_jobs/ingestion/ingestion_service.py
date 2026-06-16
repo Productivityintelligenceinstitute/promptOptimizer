@@ -5,6 +5,13 @@ Orchestrates validation, chunking, embedding, and upsert via retrieval adapters.
 Callable from HTTP API, orchestrator tools, scripts, or admin jobs.
 """
 
+
+# NOTE: Embedding always uses OpenAI (via embed_config from vector connection).
+# The job's executionProvider (anthropic/openai/google) only affects LLM execution,
+# not embedding. An OpenAI API key must be configured in the vector connection
+# regardless of which LLM provider the job uses.
+
+
 from __future__ import annotations
 
 import logging

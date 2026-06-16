@@ -26,14 +26,14 @@ def _verify_llm_key(provider: str, api_key: str) -> None:
         import openai
 
         client = openai.OpenAI(api_key=api_key)
-        client.models.list(limit=1)
+        client.models.list()
         return
     if provider == "anthropic":
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key)
         client.messages.create(
-            model="claude-3-5-haiku-latest",
+            model="claude-haiku-4-5",
             max_tokens=16,
             messages=[{"role": "user", "content": "ping"}],
         )
@@ -44,7 +44,7 @@ def _verify_llm_key(provider: str, api_key: str) -> None:
 
         client = genai.Client(api_key=api_key)
         client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents="ping",
             config=types.GenerateContentConfig(max_output_tokens=16),
         )
@@ -77,6 +77,19 @@ def create_llm_key(db: Session, owner: str, data: LlmKeyCreate) -> LlmProviderKe
     provider = data.provider.lower().strip()
     if provider not in PROVIDER_REGISTRY:
         raise ValueError(f"Unknown provider: {provider}")
+
+    existing = (
+        db.query(LlmProviderKeyModel)
+        .filter(
+            LlmProviderKeyModel.owner == owner,
+            LlmProviderKeyModel.provider == provider,
+            LlmProviderKeyModel.key_label == data.key_label.strip(),
+            LlmProviderKeyModel.status != "revoked",
+        )
+        .first()
+    )
+    if existing:
+        raise ValueError(f"A key with label '{data.key_label}' already exists for provider '{provider}'")
 
     _verify_llm_key(provider, data.api_key)
 
@@ -136,10 +149,30 @@ def verify_llm_key(db: Session, owner: str, key_id: UUID) -> LlmProviderKeyModel
     return row
 
 
-def resolve_llm_api_key(db: Session, owner: str, llm_key_id: Optional[UUID]) -> tuple[str, str]:
-    """Return (provider, decrypted_api_key). BYOK only — no platform fallback."""
+def resolve_llm_api_key(
+    db: Session,
+    owner: str,
+    llm_key_id: Optional[UUID],
+    execution_provider: Optional[str] = None,
+) -> tuple[str, str]:
+    import os
+
+    provider_env_map = {
+        "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
+        "openai": os.environ.get("OPENAI_API_KEY"),
+        "google": os.environ.get("GEMINI_API_KEY"),
+    }
+
     if not llm_key_id:
-        raise ValueError("Job is missing llmKeyId. Add a BYOK key and assign it to the job.")
+        provider = (execution_provider or "").lower().strip()
+        if provider and provider_env_map.get(provider):
+            return provider, provider_env_map[provider]
+
+        # Platform key fallback
+        for provider, env_key in provider_env_map.items():
+            if env_key:
+                return provider, env_key
+        raise ValueError("llmKeyId is required. Add a BYOK LLM key and assign it to this job.")
     row = (
         db.query(LlmProviderKeyModel)
         .filter(
@@ -253,3 +286,4 @@ def list_tool_catalog(db: Session, owner: str) -> list[dict]:
         }
         for t in tools
     ]
+

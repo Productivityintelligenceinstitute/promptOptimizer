@@ -12,24 +12,24 @@ PROVIDER_REGISTRY: dict[str, dict] = {
     "anthropic": {
         "adapter_class": ClaudeAdapter,
         "display_name": "Anthropic Claude",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-haiku-4-5",
         "models": [
-            "claude-sonnet-4-20250514",
-            "claude-opus-4-20250514",
-            "claude-3-5-haiku-latest",
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+            "claude-opus-4-5",
         ],
     },
     "openai": {
         "adapter_class": OpenAIAdapter,
         "display_name": "OpenAI",
-        "default_model": "gpt-4.1-mini",
-        "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini"],
+        "default_model": "gpt-4o-mini",
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
     },
     "google": {
         "adapter_class": GeminiAdapter,
         "display_name": "Google Gemini",
         "default_model": "gemini-2.5-flash",
-        "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
+        "models": ["gemini-2.5-pro", "gemini-2.5-flash"],
     },
 }
 

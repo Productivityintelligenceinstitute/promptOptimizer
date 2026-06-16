@@ -6,10 +6,10 @@ from dateutil import relativedelta
 from core.exceptions.not_found import NotFoundException
 from core.exceptions.conflict import ConflictException
 
-def upgrade_subscription_service(payload, db: Session):
+def upgrade_subscription_service(user_id, payload, db: Session):
     try:
         with db.begin(): 
-            active_subscription = SubscriptionRepository.get_active(payload.user_id, db)
+            active_subscription = SubscriptionRepository.get_active(user_id, db)
             if not active_subscription:
                 raise NotFoundException("User subscription not found")
             
@@ -18,14 +18,14 @@ def upgrade_subscription_service(payload, db: Session):
             
             SubscriptionRepository.cancel(active_subscription, db)
             
-            existing = SubscriptionRepository.get_by_package(payload.user_id, payload.package_id, db)
+            existing = SubscriptionRepository.get_by_package(user_id, payload.package_id, db)
             if existing:
                 SubscriptionRepository.activate(db, existing)
                 return {"status": "Subscription reactivated"}
             
             SubscriptionRepository.create(
                 db=db,
-                user_id=payload.user_id,
+                user_id=user_id,
                 package_id=payload.package_id,
                 end_date=date.today() + relativedelta.relativedelta(months=1)
             )
@@ -34,10 +34,10 @@ def upgrade_subscription_service(payload, db: Session):
     except Exception as e:
         raise HTTPException(detail=str(e), status_code=500)
 
-def cancel_subscription_service(payload, db: Session):
+def cancel_subscription_service(user_id, payload, db: Session):
     try:
         with db.begin():
-            active_subscription = SubscriptionRepository.get_active(payload.user_id, db)
+            active_subscription = SubscriptionRepository.get_active(user_id, db)
             if not active_subscription:
                 return {"status": "No active subscription to cancel"}
             

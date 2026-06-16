@@ -6,7 +6,7 @@ from context_jobs.agents.catalog import is_multi_agent_mode
 from schemas.context_jobs_model import ContextJobModel
 
 
-def build_system_prompt(job: ContextJobModel) -> str:
+def build_system_prompt(job: ContextJobModel, user_request: str = "") -> str:
     sections: list[str] = []
 
     if job.role_configuration:
@@ -16,7 +16,8 @@ def build_system_prompt(job: ContextJobModel) -> str:
     if job.stable_instructions:
         sections.append(f"## Instructions\n{job.stable_instructions}")
     if job.semantic_blueprint:
-        sections.append(f"## Expected Output Format\n{job.semantic_blueprint}")
+        blueprint = job.semantic_blueprint.replace("{topic}", user_request[:100])
+        sections.append(f"## Expected Output Format\n{blueprint}")
 
     if job.glossary_terms:
         lines = []

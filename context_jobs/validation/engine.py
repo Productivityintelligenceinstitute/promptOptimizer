@@ -57,15 +57,48 @@ async def run_validation(
         rule_type = str(rule.get("type") or "custom")
         rule_name = str(rule.get("name") or "Validation rule")
 
-        if rule_type in {"groundedness", "citation", "format"}:
-            passed = _citation_present(output_text)
-            message = "Required citations present." if passed else "Missing citations from retrieved context."
+        if rule_type == "citation":
+            passed = "[source:" in (output_text or "")
+            message = "Citations present." if passed else "Missing [source:] citations in output."
+
+        elif rule_type == "format":
+            passed = bool(job.semantic_blueprint) and any(
+                section.strip("#").strip().lower() in (output_text or "").lower()
+                for section in (job.semantic_blueprint or "").split("\n")
+                if section.startswith("#")
+            )
+            if not job.semantic_blueprint:
+                passed = True
+                message = "No semantic blueprint defined, format check skipped."
+            else:
+                message = (
+                    "Output matches expected format."
+                    if passed
+                    else "Output does not match expected format sections."
+                )
+
+        elif rule_type == "groundedness":
+            if source_traces:
+                source_names = [t.get("sourceName", "") for t in source_traces]
+                passed = any(name.lower() in (output_text or "").lower() for name in source_names if name)
+            else:
+                passed = True
+            message = "Output references retrieved sources." if passed else "Output may not be grounded in retrieved sources."
+
         elif rule_type == "policy":
-            passed = bool(output_text.strip()) and "as an ai" not in output_text.lower()
-            message = "Policy check passed." if passed else "Output may violate policy constraints."
+            forbidden = ["as an ai", "i cannot", "i'm not able to", "i am not able to"]
+            violations = [phrase for phrase in forbidden if phrase in (output_text or "").lower()]
+            passed = len(violations) == 0
+            message = "Policy check passed." if passed else f"Output contains policy violations: {', '.join(violations)}"
+
         else:
-            passed = bool(output_text.strip())
-            message = "Check passed" if passed else rule.get("description") or "Check failed"
+            description = rule.get("description", "").lower()
+            passed = bool((output_text or "").strip())
+            if description and output_text:
+                keywords = [w for w in description.split() if len(w) > 4]
+                matched = sum(1 for k in keywords if k.lower() in output_text.lower())
+                passed = matched >= max(1, len(keywords) // 3)
+            message = "Custom check passed." if passed else rule.get("description") or "Custom check failed."
 
         events.append(
             ValidationEvent(rule=rule_name, passed=passed, message=message, severity=severity)

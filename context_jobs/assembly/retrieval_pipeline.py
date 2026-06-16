@@ -69,7 +69,8 @@ def execute_retrieval(job: ContextJobModel, user_request: str, db: Session) -> R
 
     combined_query = f"{job.goal or ''}\n\n{user_request or ''}".strip() or "general request"
     if isinstance(retrieval_config, dict) and retrieval_config.get("queryRewriting"):
-        combined_query = f"{combined_query}\n\nRelated terms: {job.name or ''}"
+        # TODO: implement LLM-based query rewriting.
+        pass
 
     retrieval_mode = (job.retrieval_mode or "jet_kb").lower()
     adapter = None
@@ -87,7 +88,9 @@ def execute_retrieval(job: ContextJobModel, user_request: str, db: Session) -> R
     matches = _apply_trusted_sources_filter(matches, job.trusted_sources)
 
     if isinstance(retrieval_config, dict) and retrieval_config.get("reranking"):
-        matches = sorted(matches, key=lambda m: getattr(m, "score", 0) or 0, reverse=True)
+        # TODO: implement cross-encoder or LLM-based reranking
+        # Pinecone already returns results sorted by score so this is a no-op for now
+        pass
 
     context_blocks: list[str] = []
     retrieval_events: list[dict[str, Any]] = []

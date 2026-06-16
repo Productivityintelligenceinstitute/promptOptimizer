@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from context_jobs import schemas as cj_schemas
 from context_jobs.agents.execution_modes import normalize_execution_mode
 from context_jobs.managed_jet_kb import ensure_managed_namespace
-from context_jobs.orchestrator import enqueue_mock_run, get_mock_queue_status
+from context_jobs.orchestrator import enqueue_run, get_run_queue_status
 from context_jobs.provider_key_services import resolve_llm_api_key
 from context_jobs.vector_connection_services import get_active_connection_for_owner
 from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel
@@ -29,6 +29,16 @@ def _validate_job_vector_connection(db: Session, data: cj_schemas.ContextJobBase
 
 def _validate_llm_key(db: Session, owner: str, llm_key_id: Optional[UUID]) -> None:
     if not llm_key_id:
+        import os
+
+        # Check if platform key exists for fallback
+        provider_env_keys = {
+            "openai": os.environ.get("OPENAI_API_KEY"),
+            "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
+            "google": os.environ.get("GEMINI_API_KEY"),
+        }
+        if any(provider_env_keys.values()):
+            return  # platform key available, allow job creation without BYOK
         raise ValueError("llmKeyId is required. Add a BYOK LLM key and assign it to this job.")
     row = (
         db.query(LlmProviderKeyModel)
@@ -153,15 +163,10 @@ def delete_asset(db: Session, asset: ContextAssetModel) -> None:
 
 
 def list_runs(db: Session, owner: str) -> List[JobRunModel]:
-    job_ids = [
-        job.id
-        for job in db.query(ContextJobModel).filter(ContextJobModel.owner == owner).all()
-    ]
-    if not job_ids:
-        return []
     return (
         db.query(JobRunModel)
-        .filter(JobRunModel.job_id.in_(job_ids))
+        .join(ContextJobModel, JobRunModel.job_id == ContextJobModel.id)
+        .filter(ContextJobModel.owner == owner)
         .order_by(JobRunModel.started_at.desc())
         .all()
     )
@@ -186,12 +191,12 @@ def create_run(
     job = get_job(db, job_id, owner)
     if not job:
         raise ValueError("Job not found")
-    resolve_llm_api_key(db, owner, job.llm_key_id)
+    resolve_llm_api_key(db, owner, job.llm_key_id, job.execution_provider)
     run = JobRunModel(job_id=job_id, user_request=data.user_request or "")
     db.add(run)
     db.commit()
     db.refresh(run)
-    queued = enqueue_mock_run(run.id)
+    queued = enqueue_run(run.id)
     if not queued:
         run.state = "failed"
         run.outcome = "error"
@@ -325,4 +330,4 @@ def get_overall_stats(db: Session, owner: str) -> dict:
 
 
 def get_queue_status() -> dict:
-    return get_mock_queue_status()
+    return get_run_queue_status()

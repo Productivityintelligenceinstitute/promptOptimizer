@@ -51,7 +51,7 @@ async def _execute_run_async(run_id: UUID) -> None:
 
         try:
             await _run_stage(db, run, "planning", "Assembling context from job definition")
-            system_prompt = build_system_prompt(job)
+            system_prompt = build_system_prompt(job, run.user_request or "")
             memory_context = load_memory_context(job.owner, job.id, job.memory_config, db)
             tools = resolve_tools(job.tool_permissions, db)
             agent_catalog = compile_agent_catalog(job)
@@ -70,7 +70,7 @@ async def _execute_run_async(run_id: UUID) -> None:
 
             provider = (job.execution_provider or "openai").lower()
             model = job.execution_model or get_default_model(provider)
-            _, api_key = resolve_llm_api_key(db, job.owner, job.llm_key_id)
+            _, api_key = resolve_llm_api_key(db, job.owner, job.llm_key_id, job.execution_provider)
 
             await _run_stage(db, run, "executing", f"Executing with provider {provider}")
             user_message = assemble_user_message(

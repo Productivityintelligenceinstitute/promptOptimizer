@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from typing import Any
 
 from google import genai
@@ -35,7 +37,9 @@ class GeminiAdapter(ProviderAdapter):
         api_key: str,
         tool_executor: ToolExecutor,
     ) -> ProviderResponse:
-        client = genai.Client(api_key=api_key)
+        # TODO: migrate to async client when google-genai SDK supports it
+        use_async_client = hasattr(genai, "AsyncClient")
+        client = genai.AsyncClient(api_key=api_key) if use_async_client else genai.Client(api_key=api_key)
         contents: list[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=envelope.user_message)])
         ]
@@ -54,11 +58,22 @@ class GeminiAdapter(ProviderAdapter):
             if native_tools:
                 config_kwargs["tools"] = native_tools
 
-            response = client.models.generate_content(
-                model=envelope.model,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_kwargs),
-            )
+            if use_async_client:
+                response = await client.models.generate_content(  # type: ignore[union-attr]
+                    model=envelope.model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_kwargs),
+                )
+            else:
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: client.models.generate_content(
+                        model=envelope.model,
+                        contents=contents,
+                        config=types.GenerateContentConfig(**config_kwargs),
+                    ),
+                )
 
             usage = getattr(response, "usage_metadata", None)
             if usage:
@@ -98,7 +113,7 @@ class GeminiAdapter(ProviderAdapter):
                 args = dict(fc.args) if fc.args else {}
                 result = await tool_executor(
                     ToolCall(
-                        id=fc.name,
+                        id=f"{fc.name}-{uuid.uuid4().hex[:8]}",
                         tool_id=fc.name,
                         tool_name=fc.name,
                         arguments=args,

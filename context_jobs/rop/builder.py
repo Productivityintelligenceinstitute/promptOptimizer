@@ -56,10 +56,13 @@ def build_run_output_package(
     response: ProviderResponse,
     started_at: datetime,
     ended_at: datetime,
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     status = validation_summary.status
     next_type, next_label = NEXT_ACTION_MAP.get(status, ("retry_later", "Retry"))
-    grounded_mode = bool(source_traces)
+    grounded_mode = bool(source_traces) or bool(run.tool_events and any(
+        e.get("toolName") in {"web-search", "doc-reader"} and e.get("status") == "success"
+        for e in (run.tool_events or [])
+    ))
 
     warnings = []
     for trace in source_traces:

@@ -14,12 +14,20 @@ def _extract_facts(output_text: str, memory_type: str) -> list[dict]:
     text = (output_text or "").strip()
     if not text:
         return []
-    snippet = text[:500]
+    # TODO: replace with LLM-based fact extraction
+    # For now extract meaningful snippets by splitting on double newlines
+    # and taking the most substantial paragraph
+    paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 50]
+    if not paragraphs:
+        return [{"key": f"{memory_type}_summary", "value": {"text": text[:500]}}]
+    # Take up to 3 most substantial paragraphs
+    top = sorted(paragraphs, key=len, reverse=True)[:3]
     return [
         {
-            "key": f"{memory_type}_summary",
-            "value": {"text": snippet, "memoryType": memory_type},
+            "key": f"{memory_type}_fact_{i}",
+            "value": {"text": para[:500], "memoryType": memory_type},
         }
+        for i, para in enumerate(top)
     ]
 
 

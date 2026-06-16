@@ -67,13 +67,6 @@ def get_run_queue_status() -> dict:
     }
 
 
-# Backward-compatible aliases used by existing imports
-start_mock_run_workers = start_run_workers
-stop_mock_run_workers = stop_run_workers
-enqueue_mock_run = enqueue_run
-get_mock_queue_status = get_run_queue_status
-
-
 def _run_worker_loop() -> None:
     global _active_runs
     while not _stop_event.is_set():
