@@ -1,5 +1,3 @@
-"""Guardrail gateway for provider tool calls."""
-
 from __future__ import annotations
 
 import re
@@ -9,10 +7,19 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+import context_jobs.audit as cj_audit
 from context_jobs.agents.catalog import DELEGATE_TOOL_ID
 from context_jobs.agents.types import SubAgentDefinition
 from context_jobs.gateway.budget_tracker import BudgetTracker
+from context_jobs.hitl import (
+    assess_tool_risk_with_ai,
+    requires_tool_approval,
+    should_hard_deny_write,
+    should_skip_hitl,
+    wait_for_tool_approval,
+)
 from context_jobs.provider_key_services import resolve_tool_api_key
+from context_jobs.workspace import check_tool_allowlist
 from context_jobs.providers.base import ToolCall, ToolResult
 from context_jobs.tools import get_tool_implementation
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
@@ -36,6 +43,7 @@ class GatewayToolExecutor:
     allow_delegation: bool = False
     executed_calls: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    approval_state: str = "not_required"
     turns: int = 0
 
     @property
@@ -51,7 +59,11 @@ class GatewayToolExecutor:
             return self._deny(tool_call, "TOOL_NOT_PERMITTED", "Tool is not permitted for this job")
 
         perm = self._get_permission(tool_call.tool_id)
-        if perm.get("readOnly") and self._is_write_action(tool_call):
+        if should_hard_deny_write(
+            tool_call.tool_id,
+            perm,
+            self._is_write_action(tool_call),
+        ):
             return self._deny(tool_call, "WRITE_DENIED", "Tool is read-only for this job")
 
         if self.budget_tracker.is_exceeded():
@@ -68,6 +80,54 @@ class GatewayToolExecutor:
                 "UNSAFE_ARGUMENTS",
                 f"Arguments failed sanitization: {'; '.join(issues)}",
             )
+
+        if not should_skip_hitl(tool_call.tool_id, perm):
+            ai_is_risky, ai_reasoning = await assess_tool_risk_with_ai(
+                self.db,
+                tool_id=tool_call.tool_id,
+                tool_name=tool_call.tool_name,
+                arguments=sanitized_args,
+                job=self.job,
+            )
+
+            if requires_tool_approval(perm, ai_is_risky, tool_call.tool_id):
+                self.approval_state = "pending"
+                cj_audit.write_audit_event(
+                    self.db,
+                    event_type="tool.risk_assessed",
+                    entity_type="run",
+                    entity_id=str(self.run.id),
+                    actor=self.job.owner,
+                    metadata={
+                        "toolId": tool_call.tool_id,
+                        "toolName": tool_call.tool_name,
+                        "aiRisky": ai_is_risky,
+                        "reasoning": ai_reasoning,
+                    },
+                )
+                approved = wait_for_tool_approval(
+                    self.db,
+                    self.run,
+                    self.job,
+                    tool_call.tool_id,
+                    tool_call.tool_name,
+                    sanitized_args,
+                    risk_reason=ai_reasoning,
+                )
+                if not approved:
+                    self.approval_state = "denied"
+                    return self._deny(
+                        tool_call,
+                        "TOOL_APPROVAL_DENIED",
+                        "Human denied or timed out on risky tool execution",
+                    )
+                if self.approval_state != "denied":
+                    self.approval_state = "approved"
+
+        try:
+            check_tool_allowlist(self.db, self.job, tool_call.tool_id)
+        except ValueError as exc:
+            return self._deny(tool_call, "TOOL_NOT_ALLOWLISTED", str(exc))
 
         try:
             if tool_call.tool_id == DELEGATE_TOOL_ID:
@@ -119,8 +179,10 @@ class GatewayToolExecutor:
         self.executed_calls.append(
             {
                 "toolName": tool_call.tool_name,
+                "toolId": tool_call.tool_id,
                 "action": "denied",
                 "status": "denied",
+                "denialCode": code,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -215,3 +277,18 @@ class GatewayToolExecutor:
         )
         self.db.add(row)
         self.db.commit()
+        cj_audit.write_audit_event(
+            self.db,
+            event_type="tool.executed",
+            entity_type="run",
+            entity_id=str(self.run.id),
+            actor=self.job.owner,
+            metadata={
+                "toolId": tool_call.tool_id,
+                "toolName": tool_call.tool_name,
+                "action": "denied" if status == "denied" else "execute",
+                "status": status,
+                "denialReason": denial_reason,
+                "arguments": arguments,
+            },
+        )

@@ -109,7 +109,9 @@ def _build_specialist_prompt(job: ContextJobModel, role_prompt: str) -> str:
     parts = [role_prompt]
     if job.goal:
         parts.append(f"Job objective:\n{job.goal}")
-    if job.semantic_blueprint:
+    if job.output_template:
+        parts.append(f"Required output format:\n{job.output_template}")
+    elif job.semantic_blueprint:
         parts.append(f"Expected output format:\n{job.semantic_blueprint}")
     if job.stable_instructions:
         parts.append(f"Stable instructions:\n{job.stable_instructions}")

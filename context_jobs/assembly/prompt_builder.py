@@ -15,7 +15,16 @@ def build_system_prompt(job: ContextJobModel, user_request: str = "") -> str:
         sections.append(f"## Objective\n{job.goal}")
     if job.stable_instructions:
         sections.append(f"## Instructions\n{job.stable_instructions}")
-    if job.semantic_blueprint:
+    output_template = (job.output_template or "").strip()
+    if output_template:
+        template = output_template.replace("{topic}", user_request[:100])
+        sections.append(
+            "## Required Output Format\n"
+            "You MUST return your response strictly in this format. "
+            "Fill in the values, keep the structure exactly as shown:\n\n"
+            f"{template}"
+        )
+    elif job.semantic_blueprint:
         blueprint = job.semantic_blueprint.replace("{topic}", user_request[:100])
         sections.append(f"## Expected Output Format\n{blueprint}")
 

@@ -133,6 +133,26 @@ async def lifespan(app: FastAPI):
     kb_logger.info("Started 2 ingestion workers.")
     start_run_workers()
     kb_logger.info("Started context jobs run workers.")
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        from pathlib import Path as _Path
+        _Path("debug-be43e7.log").open("a", encoding="utf-8").write(
+            _json.dumps(
+                {
+                    "sessionId": "be43e7",
+                    "hypothesisId": "A",
+                    "location": "main.py:lifespan",
+                    "message": "app startup imports OK",
+                    "data": {"contextJobsWorkers": True},
+                    "timestamp": int(_time.time() * 1000),
+                }
+            )
+            + "\n"
+        )
+    except Exception:
+        pass
+    # #endregion
 
     try:
         yield

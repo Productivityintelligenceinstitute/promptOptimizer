@@ -46,6 +46,27 @@ def determine_terminal_state(rop_status: str) -> tuple[str, str]:
     return mapping.get(rop_status, ("failed", "error"))
 
 
+def _approval_state_for_run(
+    run: JobRunModel,
+    job: ContextJobModel,
+    tool_executor: GatewayToolExecutor | None = None,
+) -> str:
+    executor_state = getattr(tool_executor, "approval_state", None) if tool_executor else None
+    if executor_state and executor_state != "not_required":
+        return executor_state
+
+    approvals = run.pending_approvals or []
+    if any(item.get("status") == "pending" for item in approvals):
+        return "pending"
+    if any(item.get("status") == "approved" for item in approvals):
+        return "approved"
+    if any(item.get("status") == "denied" for item in approvals):
+        return "denied"
+    if job.approval_required:
+        return "pending"
+    return "not_required"
+
+
 def build_run_output_package(
     run: JobRunModel,
     job: ContextJobModel,
@@ -56,7 +77,9 @@ def build_run_output_package(
     response: ProviderResponse,
     started_at: datetime,
     ended_at: datetime,
-    ) -> dict[str, Any]:
+    repair_cycles: int = 0,
+    structured_output: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     status = validation_summary.status
     next_type, next_label = NEXT_ACTION_MAP.get(status, ("retry_later", "Retry"))
     grounded_mode = bool(source_traces) or bool(run.tool_events and any(
@@ -99,13 +122,19 @@ def build_run_output_package(
             }
         )
 
+    from context_jobs.workspace import default_workspace_id
+
+    primary: dict[str, Any] = {
+        "resultType": RESULT_TYPE_MAP.get(job.workflow_type or "standard", "text_output"),
+        "title": f"{job.name} — Run Result",
+        "content": response.content or "",
+    }
+    if structured_output:
+        primary["structuredOutput"] = structured_output
+
     return {
         "status": status,
-        "primaryResult": {
-            "resultType": RESULT_TYPE_MAP.get(job.workflow_type or "standard", "text_output"),
-            "title": f"{job.name} — Run Result",
-            "content": response.content or "",
-        },
+        "primaryResult": primary,
         "validationSummary": {
             "overallDecision": validation_summary.overall_decision,
             "confidenceLevel": validation_summary.confidence_level,
@@ -134,17 +163,13 @@ def build_run_output_package(
             "stages": [log.get("step") for log in (run.step_logs or []) if isinstance(log, dict)],
             "toolEvents": tool_executor.total_calls,
             "retrievalEvents": len(run.retrieval_events or []),
-            "repairCycles": 0,
-            "replayAvailable": True,
+            "repairCycles": repair_cycles,
+            "replayAvailable": bool(getattr(run, "replay_snapshot", None) or True),
         },
         "memoryStateChanges": {
-            "updated": bool(
-                job.memory_config
-                and any(
-                    job.memory_config.get(k)
-                    for k in ("sessionMemory", "projectMemory", "userProfileMemory")
-                )
-            ),
+            "updated": False,
+            "approvalRequired": False,
+            "approvalGranted": False,
             "changes": [],
         },
         "costTimeSummary": {
@@ -159,11 +184,11 @@ def build_run_output_package(
         "auditMetadata": {
             "runId": str(run.id),
             "jobId": str(job.id),
-            "jobVersion": job.version,
-            "workspaceId": "default",
+            "jobVersion": run.job_version or job.version,
+            "workspaceId": getattr(job, "workspace_id", None) or default_workspace_id(job.owner or ""),
             "actor": job.owner,
             "environment": os.environ.get("ENVIRONMENT", "development"),
-            "approvalState": "pending" if job.approval_required else "not_required",
+            "approvalState": _approval_state_for_run(run, job, tool_executor),
             "policyProfile": job.policy_profile,
             "executionMode": getattr(job, "execution_mode", "single_agent"),
         },

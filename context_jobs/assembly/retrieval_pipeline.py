@@ -8,6 +8,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from context_jobs.knowledge_sources import (
+    merge_retrieval_results,
+    retrieve_from_knowledge_sources,
+)
 from context_jobs.managed_jet_kb import ensure_managed_namespace
 from context_jobs.retrieval.factory import get_retrieval_adapter
 from context_jobs.retrieval.security import decrypt_config
@@ -69,8 +73,31 @@ def execute_retrieval(job: ContextJobModel, user_request: str, db: Session) -> R
 
     combined_query = f"{job.goal or ''}\n\n{user_request or ''}".strip() or "general request"
     if isinstance(retrieval_config, dict) and retrieval_config.get("queryRewriting"):
-        # TODO: implement LLM-based query rewriting.
-        pass
+        try:
+            import os
+            from openai import OpenAI
+
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            rewrite_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=256,
+                temperature=0,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Rewrite this search query to be more specific and retrieve better results "
+                            f"from a vector database. Return only the rewritten query, nothing else.\n\n"
+                            f"Original query: {combined_query}"
+                        ),
+                    }
+                ],
+            )
+            rewritten = (rewrite_response.choices[0].message.content or "").strip()
+            if rewritten:
+                combined_query = rewritten
+        except Exception:
+            pass  # fall back to original query if rewriting fails
 
     retrieval_mode = (job.retrieval_mode or "jet_kb").lower()
     adapter = None
@@ -87,10 +114,45 @@ def execute_retrieval(job: ContextJobModel, user_request: str, db: Session) -> R
     matches = adapter.search(combined_query, top_k=top_k) or []
     matches = _apply_trusted_sources_filter(matches, job.trusted_sources)
 
-    if isinstance(retrieval_config, dict) and retrieval_config.get("reranking"):
-        # TODO: implement cross-encoder or LLM-based reranking
-        # Pinecone already returns results sorted by score so this is a no-op for now
-        pass
+    hybrid = bool(isinstance(retrieval_config, dict) and retrieval_config.get("hybridRetrieval"))
+    inline_rag, inline_events, inline_traces = retrieve_from_knowledge_sources(
+        job, combined_query, db, max_documents=top_k
+    )
+
+    if isinstance(retrieval_config, dict) and retrieval_config.get("reranking") and len(matches) > 1:
+        try:
+            import os
+            import json
+            from openai import OpenAI
+
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            previews = []
+            for i, m in enumerate(matches):
+                meta = getattr(m, "metadata", None) or {}
+                preview = (getattr(m, "text_preview", None) or meta.get("preview") or "")[:300]
+                previews.append(f"{i}: {preview}")
+            rerank_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=128,
+                temperature=0,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Given this query: '{combined_query}'\n\n"
+                            f"Rank these documents by relevance (most relevant first). "
+                            f"Return only a JSON array of indices like [2,0,1]. "
+                            f"Documents:\n" + "\n".join(previews)
+                        ),
+                    }
+                ],
+            )
+            raw = (rerank_response.choices[0].message.content or "").strip()
+            indices = json.loads(raw)
+            if isinstance(indices, list) and len(indices) == len(matches):
+                matches = [matches[i] for i in indices if isinstance(i, int) and i < len(matches)]
+        except Exception:
+            pass  # fall back to original order if reranking fails
 
     context_blocks: list[str] = []
     retrieval_events: list[dict[str, Any]] = []
@@ -127,7 +189,18 @@ def execute_retrieval(job: ContextJobModel, user_request: str, db: Session) -> R
             }
         )
 
-    rag_context = "\n\n---\n\n".join(context_blocks) if context_blocks else "No context retrieved."
+    rag_context = "\n\n---\n\n".join(context_blocks) if context_blocks else ""
+    rag_context, retrieval_events, source_trace_events = merge_retrieval_results(
+        rag_context or "No context retrieved.",
+        retrieval_events,
+        source_trace_events,
+        inline_rag,
+        inline_events,
+        inline_traces,
+        hybrid=hybrid or bool(inline_rag),
+    )
+    if not rag_context.strip():
+        rag_context = "No context retrieved."
     return RetrievalResult(
         rag_context=rag_context,
         retrieval_events=retrieval_events,

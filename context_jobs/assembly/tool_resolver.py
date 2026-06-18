@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from context_jobs.hitl import should_skip_hitl
 from context_jobs.providers.base import ToolDefinition
 from schemas.tool_registry_model import ToolRegistryModel
 
@@ -36,7 +37,7 @@ def resolve_tools(job_permissions: list[dict] | None, db: Session) -> list[ToolD
                 name=row.name,
                 description=row.description,
                 input_schema=row.input_schema or {"type": "object", "properties": {}},
-                is_read_only=bool(perm.get("readOnly", row.is_read_only)),
+                is_read_only=should_skip_hitl(tool_id, perm),
             )
         )
     return definitions

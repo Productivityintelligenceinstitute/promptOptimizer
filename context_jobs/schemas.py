@@ -1,8 +1,9 @@
 from datetime import datetime
+import json
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 
 class ContextJobBase(BaseModel):
@@ -12,6 +13,7 @@ class ContextJobBase(BaseModel):
     goal: Optional[str] = None
 
     semantic_blueprint: Optional[str] = Field(None, alias="semanticBlueprint")
+    output_template: Optional[str] = Field(None, alias="outputTemplate")
     workflow_type: str = Field("standard", alias="workflowType")
     stable_instructions: Optional[str] = Field(None, alias="stableInstructions")
     role_configuration: Optional[str] = Field(None, alias="roleConfiguration")
@@ -38,6 +40,7 @@ class ContextJobBase(BaseModel):
     llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
     max_agent_turns: int = Field(10, alias="maxAgentTurns")
     execution_mode: str = Field("single_agent", alias="executionMode")
+    workspace_id: Optional[str] = Field(None, alias="workspaceId")
 
     class Config:
         populate_by_name = True
@@ -54,6 +57,7 @@ class ContextJobUpdate(BaseModel):
     goal: Optional[str] = None
 
     semantic_blueprint: Optional[str] = Field(None, alias="semanticBlueprint")
+    output_template: Optional[str] = Field(None, alias="outputTemplate")
     workflow_type: Optional[str] = Field(None, alias="workflowType")
     stable_instructions: Optional[str] = Field(None, alias="stableInstructions")
     role_configuration: Optional[str] = Field(None, alias="roleConfiguration")
@@ -80,6 +84,7 @@ class ContextJobUpdate(BaseModel):
     llm_key_id: Optional[UUID] = Field(None, alias="llmKeyId")
     max_agent_turns: Optional[int] = Field(None, alias="maxAgentTurns")
     execution_mode: Optional[str] = Field(None, alias="executionMode")
+    workspace_id: Optional[str] = Field(None, alias="workspaceId")
 
     class Config:
         populate_by_name = True
@@ -102,6 +107,9 @@ class ContextAssetBase(BaseModel):
     content: Optional[Any] = None
     version: int = 1
     status: str = "active"
+    owner: Optional[str] = None
+    workspace_id: Optional[str] = Field(None, alias="workspaceId")
+    approval_status: str = Field("approved", alias="approvalStatus")
 
 
 class ContextAssetCreate(ContextAssetBase):
@@ -115,6 +123,7 @@ class ContextAssetUpdate(BaseModel):
     content: Optional[Any] = None
     version: Optional[int] = None
     status: Optional[str] = None
+    approval_status: Optional[str] = Field(None, alias="approvalStatus")
 
 
 class ContextAssetOut(ContextAssetBase):
@@ -128,6 +137,14 @@ class ContextAssetOut(ContextAssetBase):
 
 class JobRunCreate(BaseModel):
     user_request: Optional[str] = Field("", alias="userRequest")
+
+    class Config:
+        populate_by_name = True
+
+
+class PromptToJobRequest(BaseModel):
+    prompt: str
+    agent_type: Optional[str] = Field(None, alias="agentType")
 
     class Config:
         populate_by_name = True
@@ -152,6 +169,7 @@ class JobRunOut(BaseModel):
 
     outcome: Optional[str] = None
     output_text: Optional[str] = Field(None, alias="outputText")
+    job_version: Optional[int] = Field(None, alias="jobVersion")
     token_usage: Optional[int] = Field(None, alias="tokenUsage")
     latency_ms: Optional[int] = Field(None, alias="latencyMs")
     execution_provider: Optional[str] = Field(None, alias="executionProvider")
@@ -160,16 +178,147 @@ class JobRunOut(BaseModel):
     total_tool_calls: Optional[int] = Field(None, alias="totalToolCalls")
     estimated_cost_usd: Optional[float] = Field(None, alias="estimatedCostUsd")
     agent_turns: Optional[int] = Field(None, alias="agentTurns")
+    pending_approvals: Optional[list] = Field(None, alias="pendingApprovals")
+    pending_memory_changes: Optional[dict] = Field(None, alias="pendingMemoryChanges")
+    repair_cycles: Optional[int] = Field(None, alias="repairCycles")
+    parent_run_id: Optional[UUID] = Field(None, alias="parentRunId")
+    workspace_id: Optional[str] = Field(None, alias="workspaceId")
 
     class Config:
         from_attributes = True
         populate_by_name = True
+
+    @staticmethod
+    def _normalize_output_text(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return str(value)
+
+        text = value.strip()
+        if not text:
+            return text
+
+        current: Any = text
+        for _ in range(2):
+            if not isinstance(current, str):
+                break
+            candidate = current.strip()
+            try:
+                parsed = json.loads(candidate)
+            except Exception:
+                break
+            current = parsed
+
+        if isinstance(current, (dict, list)):
+            return json.dumps(current, ensure_ascii=False, separators=(",", ":"))
+        if isinstance(current, str):
+            return current
+        return text
+
+    @field_serializer("output_text", when_used="json")
+    def serialize_output_text(self, value: Any) -> Optional[str]:
+        return self._normalize_output_text(value)
+
+    @model_validator(mode="after")
+    def mask_while_awaiting_approval(self) -> "JobRunOut":
+        from context_jobs.hitl import (
+            WAITING_ON_APPROVAL_MESSAGE,
+            build_waiting_run_output_package,
+            summarize_pending_approvals,
+            waiting_message_for_tools,
+        )
+
+        if self.state == "awaiting_tool_approval":
+            pending = self.pending_approvals
+            self.output_text = waiting_message_for_tools(pending)
+            self.run_output_package = build_waiting_run_output_package(pending)
+            self.pending_approvals = summarize_pending_approvals(pending)
+            self.tool_events = None
+            self.outcome = None
+        elif self.state == "awaiting_memory_approval":
+            self.output_text = WAITING_ON_APPROVAL_MESSAGE
+            self.pending_memory_changes = None
+            if not self.run_output_package:
+                self.run_output_package = {
+                    "status": "awaiting_memory_approval",
+                    "primaryResult": {
+                        "resultType": "text_output",
+                        "title": "Waiting for approval",
+                        "content": WAITING_ON_APPROVAL_MESSAGE,
+                    },
+                    "nextAction": {
+                        "type": "request_approval",
+                        "label": WAITING_ON_APPROVAL_MESSAGE,
+                    },
+                }
+        return self
+
+
+class ContextJobVersionOut(BaseModel):
+    id: UUID
+    job_id: UUID = Field(..., alias="jobId")
+    version: int
+    created_at: datetime = Field(..., alias="createdAt")
+    created_by: Optional[str] = Field(None, alias="createdBy")
+    change_type: Optional[str] = Field(None, alias="changeType")
+    is_current: bool = Field(..., alias="isCurrent")
+    rollback_from_version: Optional[int] = Field(None, alias="rollbackFromVersion")
+    notes: Optional[str] = None
+    job_snapshot: dict[str, Any] = Field(..., alias="jobSnapshot")
+
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class PublishHistoryOut(BaseModel):
+    id: UUID
+    job_id: UUID = Field(..., alias="jobId")
+    from_status: str = Field(..., alias="fromStatus")
+    to_status: str = Field(..., alias="toStatus")
+    changed_by: str = Field(..., alias="changedBy")
+    changed_at: datetime = Field(..., alias="changedAt")
+    notes: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class AuditEventOut(BaseModel):
+    id: UUID
+    event_type: str = Field(..., alias="eventType")
+    entity_type: str = Field(..., alias="entityType")
+    entity_id: str = Field(..., alias="entityId")
+    actor: str
+    timestamp: datetime
+    metadata: Optional[dict[str, Any]] = None
+
+    class Config:
+        populate_by_name = True
+        from_attributes = True
 
 
 class RunDecisionRequest(BaseModel):
     decision: str
     notes: Optional[str] = None
     decided_by: str = Field("current_user", alias="decidedBy")
+
+    class Config:
+        populate_by_name = True
+
+
+class JobVersionRollbackRequest(BaseModel):
+    version: int = Field(..., ge=1, alias="version")
+    notes: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class JobLifecycleRequest(BaseModel):
+    notes: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -224,6 +373,51 @@ class IngestionRequest(BaseModel):
 
     documents: list[IngestionDocument]
     ingestion_config: dict[str, Any] | None = Field(None, alias="ingestionConfig")
+
+    class Config:
+        populate_by_name = True
+
+
+class ToolApprovalRequest(BaseModel):
+    decision: str
+    notes: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class MemoryConfirmRequest(BaseModel):
+    approved: bool
+
+    class Config:
+        populate_by_name = True
+
+
+class WorkspaceMemberCreate(BaseModel):
+    user_id: str = Field(..., alias="userId")
+    role: str = "editor"
+
+    class Config:
+        populate_by_name = True
+
+
+class AllowlistUpdate(BaseModel):
+    tools: Optional[list[str]] = None
+    sources: Optional[list[str]] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class AssetImportRequest(BaseModel):
+    asset_id: UUID = Field(..., alias="assetId")
+
+    class Config:
+        populate_by_name = True
+
+
+class IdentityMatchRequest(BaseModel):
+    query: str
 
     class Config:
         populate_by_name = True
