@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,7 +12,9 @@ from sqlalchemy.orm import Session
 import context_jobs.audit as cj_audit
 from context_jobs.agents.catalog import DELEGATE_TOOL_ID
 from context_jobs.agents.types import SubAgentDefinition
+from context_jobs.assembly.prompt_safety import wrap_tool_result_content
 from context_jobs.gateway.budget_tracker import BudgetTracker
+from context_jobs.gateway.contract_context import consolidate_contract_analyzer_text
 from context_jobs.hitl import (
     assess_tool_risk_with_ai,
     requires_tool_approval,
@@ -19,17 +23,25 @@ from context_jobs.hitl import (
     wait_for_tool_approval,
 )
 from context_jobs.provider_key_services import resolve_tool_api_key
+from context_jobs.text_sanitize import (
+    compact_tool_arguments_for_db,
+    sanitize_db_text,
+    sanitize_for_db,
+)
 from context_jobs.workspace import check_tool_allowlist
 from context_jobs.providers.base import ToolCall, ToolResult
-from context_jobs.tools import get_tool_implementation
+from context_jobs.tools import TOOL_IMPLEMENTATIONS, get_tool_implementation
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 from schemas.tool_execution_model import ToolExecutionModel
 
 _WRITE_TOOL_IDS = {"file-write", "docx-generate", DELEGATE_TOOL_ID}
 _RUN_CONTEXT_TOOL_IDS = {"file-write", "docx-generate"}
+GATEWAY_TOOL_ALLOWLIST = frozenset(TOOL_IMPLEMENTATIONS.keys())
 
 
 _LOCALHOST_PATTERN = re.compile(r"^(localhost|127\.0\.0\.1|0\.0\.0\.0)$", re.I)
+_RESULT_SUMMARY_MAX = 50_000
+_log = logging.getLogger("context_jobs.gateway.tools")
 
 
 @dataclass
@@ -42,9 +54,11 @@ class GatewayToolExecutor:
     delegate_runner: Any | None = None
     allow_delegation: bool = False
     executed_calls: list[dict[str, Any]] = field(default_factory=list)
+    tool_outputs: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     approval_state: str = "not_required"
     turns: int = 0
+    retrieved_context: str = ""
 
     @property
     def total_calls(self) -> int:
@@ -53,6 +67,17 @@ class GatewayToolExecutor:
     async def __call__(self, tool_call: ToolCall) -> ToolResult:
         self.turns += 1
         return await self.check_and_execute(tool_call)
+
+    def _record_tool_output(self, tool_call: ToolCall, result_text: str, status: str) -> None:
+        """Full tool JSON for validation — independent of DB audit logging."""
+        self.tool_outputs.append(
+            {
+                "toolId": tool_call.tool_id,
+                "toolName": tool_call.tool_name,
+                "status": status,
+                "resultSummary": sanitize_db_text(result_text),
+            }
+        )
 
     async def check_and_execute(self, tool_call: ToolCall) -> ToolResult:
         if not self._is_tool_allowed(tool_call.tool_id):
@@ -81,6 +106,17 @@ class GatewayToolExecutor:
                 f"Arguments failed sanitization: {'; '.join(issues)}",
             )
 
+        if tool_call.tool_id == "contract-analyzer":
+            source = str((sanitized_args or {}).get("source") or "").strip().lower()
+            if source == "text" and (self.retrieved_context or "").strip():
+                sanitized_args = dict(sanitized_args)
+                sanitized_args["value"] = sanitize_db_text(
+                    consolidate_contract_analyzer_text(
+                        str(sanitized_args.get("value") or ""),
+                        self.retrieved_context,
+                    )
+                )
+
         if not should_skip_hitl(tool_call.tool_id, perm):
             ai_is_risky, ai_reasoning = await assess_tool_risk_with_ai(
                 self.db,
@@ -105,15 +141,19 @@ class GatewayToolExecutor:
                         "reasoning": ai_reasoning,
                     },
                 )
-                approved = wait_for_tool_approval(
-                    self.db,
-                    self.run,
-                    self.job,
-                    tool_call.tool_id,
-                    tool_call.tool_name,
-                    sanitized_args,
-                    risk_reason=ai_reasoning,
-                )
+                self.budget_tracker.pause()
+                try:
+                    approved = wait_for_tool_approval(
+                        self.db,
+                        self.run,
+                        self.job,
+                        tool_call.tool_id,
+                        tool_call.tool_name,
+                        sanitized_args,
+                        risk_reason=ai_reasoning,
+                    )
+                finally:
+                    self.budget_tracker.resume()
                 if not approved:
                     self.approval_state = "denied"
                     return self._deny(
@@ -123,6 +163,13 @@ class GatewayToolExecutor:
                     )
                 if self.approval_state != "denied":
                     self.approval_state = "approved"
+
+        if tool_call.tool_id != DELEGATE_TOOL_ID and tool_call.tool_id not in GATEWAY_TOOL_ALLOWLIST:
+            return self._deny(
+                tool_call,
+                "TOOL_NOT_REGISTERED",
+                f"Tool {tool_call.tool_id!r} is not registered for gateway execution",
+            )
 
         try:
             check_tool_allowlist(self.db, self.job, tool_call.tool_id)
@@ -148,20 +195,33 @@ class GatewayToolExecutor:
                     result_text = await tool_impl.execute(sanitized_args, api_key=tool_api_key)
                 self._maybe_record_artifact(tool_call.tool_id, sanitized_args, result_text)
             self.budget_tracker.record_tool_call()
+            self._record_tool_output(tool_call, result_text, "success")
             self._log_execution(tool_call, sanitized_args, result_text, "success", None)
             self.executed_calls.append(
                 {
+                    "toolId": tool_call.tool_id,
                     "toolName": tool_call.tool_name,
                     "action": "execute",
                     "status": "success",
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            return ToolResult(tool_call_id=tool_call.id, content=result_text, is_error=False)
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                content=wrap_tool_result_content(result_text),
+                is_error=False,
+            )
         except Exception as exc:
-            self._log_execution(tool_call, sanitized_args, str(exc), "error", None)
+            error_text = str(exc)
+            self._record_tool_output(
+                tool_call,
+                json.dumps({"error": error_text}, ensure_ascii=False),
+                "error",
+            )
+            self._log_execution(tool_call, sanitized_args, error_text, "error", None)
             self.executed_calls.append(
                 {
+                    "toolId": tool_call.tool_id,
                     "toolName": tool_call.tool_name,
                     "action": "execute",
                     "status": "error",
@@ -242,14 +302,19 @@ class GatewayToolExecutor:
 
     def _sanitize_arguments(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         issues: list[str] = []
-        sanitized = dict(arguments)
-        for key in ("url", "endpoint"):
+        sanitized = sanitize_for_db(dict(arguments))
+        url_keys = ["url", "endpoint"]
+        if str(sanitized.get("source") or "").strip().lower() == "url":
+            url_keys.append("value")
+        for key in url_keys:
             value = sanitized.get(key)
             if not value:
                 continue
             from urllib.parse import urlparse
 
             parsed = urlparse(str(value))
+            if not parsed.scheme and not parsed.hostname:
+                continue
             host = parsed.hostname or ""
             if _LOCALHOST_PATTERN.match(host):
                 issues.append("localhost access is not allowed")
@@ -265,30 +330,51 @@ class GatewayToolExecutor:
         status: str,
         denial_reason: str | None,
     ) -> None:
-        row = ToolExecutionModel(
-            run_id=self.run.id,
-            tool_id=tool_call.tool_id,
-            tool_name=tool_call.tool_name,
-            action="denied" if status == "denied" else "execute",
-            status=status,
-            arguments=arguments,
-            result_summary=(result_summary or "")[:3000],
-            denial_reason=denial_reason,
-        )
-        self.db.add(row)
-        self.db.commit()
-        cj_audit.write_audit_event(
-            self.db,
-            event_type="tool.executed",
-            entity_type="run",
-            entity_id=str(self.run.id),
-            actor=self.job.owner,
-            metadata={
-                "toolId": tool_call.tool_id,
-                "toolName": tool_call.tool_name,
-                "action": "denied" if status == "denied" else "execute",
-                "status": status,
-                "denialReason": denial_reason,
-                "arguments": arguments,
-            },
-        )
+        safe_args = compact_tool_arguments_for_db(tool_call.tool_id, arguments)
+        safe_summary = sanitize_db_text(result_summary)[:_RESULT_SUMMARY_MAX]
+        safe_denial = sanitize_db_text(denial_reason) if denial_reason else None
+        try:
+            row = ToolExecutionModel(
+                run_id=self.run.id,
+                tool_id=tool_call.tool_id,
+                tool_name=tool_call.tool_name,
+                action="denied" if status == "denied" else "execute",
+                status=status,
+                arguments=safe_args,
+                result_summary=safe_summary,
+                denial_reason=safe_denial,
+            )
+            self.db.add(row)
+            self.db.commit()
+            try:
+                cj_audit.write_audit_event(
+                    self.db,
+                    event_type="tool.executed",
+                    entity_type="run",
+                    entity_id=str(self.run.id),
+                    actor=self.job.owner,
+                    metadata={
+                        "toolId": tool_call.tool_id,
+                        "toolName": tool_call.tool_name,
+                        "action": "denied" if status == "denied" else "execute",
+                        "status": status,
+                        "denialReason": safe_denial,
+                        "arguments": safe_args,
+                    },
+                )
+            except Exception as audit_exc:
+                self.db.rollback()
+                _log.warning(
+                    "tool audit event failed for %s on run %s: %s",
+                    tool_call.tool_id,
+                    self.run.id,
+                    audit_exc,
+                )
+        except Exception as exc:
+            self.db.rollback()
+            _log.warning(
+                "tool execution DB log failed for %s on run %s: %s",
+                tool_call.tool_id,
+                self.run.id,
+                exc,
+            )

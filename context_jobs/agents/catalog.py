@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from context_jobs.agents.execution_modes import EXECUTION_MODE_MULTI, normalize_execution_mode
 from context_jobs.agents.types import SubAgentDefinition
+from context_jobs.assembly.output_format import build_output_format_prompt
+from context_jobs.assembly.prompt_safety import append_prompt_injection_policy
 from schemas.context_jobs_model import ContextJobModel
 
 DELEGATE_TOOL_ID = "delegate-to-agent"
@@ -63,6 +65,32 @@ SPECIALIST_BLUEPRINTS: dict[str, dict] = {
             "and return a concise pass/fail style assessment with evidence."
         ),
     },
+    "sourcing_analyst": {
+        "description": (
+            "Use for contract and supplier market analysis: extracting contract terms, "
+            "reviewing vendor documents, and researching market benchmarks or alternatives."
+        ),
+        "tool_ids": ("contract-analyzer", "doc-reader", "web-search"),
+        "prompt": (
+            "You are a sourcing analyst specialist. Analyze contracts and supplier materials, "
+            "research market context, and return structured findings on terms, risks, and "
+            "competitive positioning for the orchestrator. "
+            "For pasted contract text or contract URLs, call contract-analyzer before summarizing."
+        ),
+    },
+    "compliance_reviewer": {
+        "description": (
+            "Use for read-only policy and clause verification: checking documents against "
+            "regulatory requirements, internal policies, or contractual obligations without "
+            "modifying artifacts."
+        ),
+        "tool_ids": ("doc-reader", "web-search"),
+        "prompt": (
+            "You are a compliance reviewer specialist. Review documents and policies read-only, "
+            "verify clauses against applicable requirements, and return a concise assessment "
+            "with evidence citations and any gaps or violations identified."
+        ),
+    },
 }
 
 
@@ -109,13 +137,14 @@ def _build_specialist_prompt(job: ContextJobModel, role_prompt: str) -> str:
     parts = [role_prompt]
     if job.goal:
         parts.append(f"Job objective:\n{job.goal}")
-    if job.output_template:
-        parts.append(f"Required output format:\n{job.output_template}")
+    format_section = build_output_format_prompt(job)
+    if format_section:
+        parts.append(format_section)
     elif job.semantic_blueprint:
         parts.append(f"Expected output format:\n{job.semantic_blueprint}")
     if job.stable_instructions:
         parts.append(f"Stable instructions:\n{job.stable_instructions}")
-    return "\n\n".join(parts)
+    return append_prompt_injection_policy("\n\n".join(parts))
 
 
 def build_delegate_tool_schema(catalog: dict[str, SubAgentDefinition]) -> dict:

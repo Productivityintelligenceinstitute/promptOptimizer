@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 import json
 from typing import Any, Optional
 from uuid import UUID
@@ -30,6 +30,7 @@ class ContextJobBase(BaseModel):
     glossary_terms: Optional[list[dict]] = Field(None, alias="glossaryTerms")
     relationships: Optional[list[dict]] = None
     trusted_sources: Optional[list[dict]] = Field(None, alias="trustedSources")
+    chain_config: Optional[dict] = Field(None, alias="chainConfig")
 
     version: int = 1
     owner: Optional[str] = None
@@ -47,7 +48,7 @@ class ContextJobBase(BaseModel):
 
 
 class ContextJobCreate(ContextJobBase):
-    pass
+    asset_ids: Optional[list[UUID]] = Field(None, alias="assetIds")
 
 
 class ContextJobUpdate(BaseModel):
@@ -74,6 +75,7 @@ class ContextJobUpdate(BaseModel):
     glossary_terms: Optional[list[dict]] = Field(None, alias="glossaryTerms")
     relationships: Optional[list[dict]] = None
     trusted_sources: Optional[list[dict]] = Field(None, alias="trustedSources")
+    chain_config: Optional[dict] = Field(None, alias="chainConfig")
 
     version: Optional[int] = None
     owner: Optional[str] = None
@@ -85,6 +87,7 @@ class ContextJobUpdate(BaseModel):
     max_agent_turns: Optional[int] = Field(None, alias="maxAgentTurns")
     execution_mode: Optional[str] = Field(None, alias="executionMode")
     workspace_id: Optional[str] = Field(None, alias="workspaceId")
+    asset_ids: Optional[list[UUID]] = Field(None, alias="assetIds")
 
     class Config:
         populate_by_name = True
@@ -255,6 +258,42 @@ class JobRunOut(BaseModel):
         return self
 
 
+class RunChainParentOut(BaseModel):
+    run_id: UUID = Field(..., alias="runId")
+    job_id: UUID = Field(..., alias="jobId")
+    job_name: str = Field(..., alias="jobName")
+    status: str
+    created_at: datetime = Field(..., alias="createdAt")
+
+    class Config:
+        populate_by_name = True
+
+
+class RunChainNodeOut(BaseModel):
+    run_id: UUID = Field(..., alias="runId")
+    job_id: UUID = Field(..., alias="jobId")
+    job_name: str = Field(..., alias="jobName")
+    status: str
+    created_at: datetime = Field(..., alias="createdAt")
+    child_runs: list["RunChainNodeOut"] = Field(default_factory=list, alias="childRuns")
+
+    class Config:
+        populate_by_name = True
+
+
+class RunChainOut(BaseModel):
+    run_id: UUID = Field(..., alias="runId")
+    parent_run_id: UUID | None = Field(None, alias="parentRunId")
+    parent_run: RunChainParentOut | None = Field(None, alias="parentRun")
+    child_runs: list[RunChainNodeOut] = Field(default_factory=list, alias="childRuns")
+
+    class Config:
+        populate_by_name = True
+
+
+RunChainNodeOut.model_rebuild()
+
+
 class ContextJobVersionOut(BaseModel):
     id: UUID
     job_id: UUID = Field(..., alias="jobId")
@@ -360,11 +399,42 @@ class ExecutionModesOut(BaseModel):
     modes: list[dict[str, str]]
 
 
+class ProcurementAlertOut(BaseModel):
+    id: UUID
+    owner: str
+    workspace_id: str | None = Field(None, alias="workspaceId")
+    vendor: str | None = None
+    contract_document_id: str = Field(..., alias="contractDocumentId")
+    expiry_date: date = Field(..., alias="expiryDate")
+    complexity_tier: str = Field(..., alias="complexityTier")
+    lead_months_threshold: int = Field(..., alias="leadMonthsThreshold")
+    complexity_tier_defaulted: bool = Field(..., alias="complexityTierDefaulted")
+    alerted_at: datetime = Field(..., alias="alertedAt")
+    dismissed: bool
+    suggested_job_id: UUID | None = Field(None, alias="suggestedJobId")
+
+    class Config:
+        populate_by_name = True
+        from_attributes = True
+
+
+class IngestionDocumentMetadata(BaseModel):
+    """Client-provided ingest metadata: optional document name/title only."""
+
+    name: str | None = None
+    document_name: str | None = Field(None, alias="documentName")
+    title: str | None = None
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
 class IngestionDocument(BaseModel):
     """Single document for ingestion."""
 
     text: str
-    metadata: dict[str, Any] | None = None
+    metadata: IngestionDocumentMetadata | str | None = None
     id: str | None = None
 
 
@@ -373,6 +443,15 @@ class IngestionRequest(BaseModel):
 
     documents: list[IngestionDocument]
     ingestion_config: dict[str, Any] | None = Field(None, alias="ingestionConfig")
+
+    class Config:
+        populate_by_name = True
+
+
+class ExternalIngestionRequest(IngestionRequest):
+    """Ingest documents into a saved external vector connection (no job required)."""
+
+    vector_connection_id: UUID = Field(..., alias="vectorConnectionId")
 
     class Config:
         populate_by_name = True

@@ -14,6 +14,7 @@ from context_jobs.providers.base import (
     ToolCall,
     ToolDefinition,
     ToolExecutor,
+    is_fatal_tool_denial,
 )
 
 
@@ -114,6 +115,15 @@ class OpenAIAdapter(ProviderAdapter):
                         "content": result.content,
                     }
                 )
+                if is_fatal_tool_denial(result):
+                    return ProviderResponse(
+                        content=message.content or result.content,
+                        input_tokens=total_input,
+                        output_tokens=total_output,
+                        model=envelope.model,
+                        stop_reason="budget_exceeded",
+                        agent_turns=turns,
+                    )
 
         return ProviderResponse(
             content="Agent stopped: maximum turns reached.",

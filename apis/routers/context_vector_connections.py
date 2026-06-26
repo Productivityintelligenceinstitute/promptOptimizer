@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from context_jobs.auth import get_authenticated_user_id
+from context_jobs.auth import get_context_jobs_owner_with_access
 from database import database
 from context_jobs.embeddings import supported_models_catalog
 from context_jobs.vector_connection_schemas import (
@@ -26,7 +26,7 @@ context_vector_connections_router = APIRouter(prefix="/context-jobs/vector-conne
     tags=["Context Jobs"],
 )
 async def list_supported_embedding_models(
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
 ):
     raw = supported_models_catalog()
     return [EmbeddingModelOption.model_validate(r) for r in raw]
@@ -38,7 +38,7 @@ async def list_supported_embedding_models(
     tags=["Context Jobs"],
 )
 async def list_vector_connections(
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
     include_disabled: bool = False,
 ):
@@ -53,7 +53,7 @@ async def list_vector_connections(
 )
 async def create_vector_connection(
     payload: VectorConnectionCreate,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -77,7 +77,7 @@ async def create_vector_connection(
 async def update_vector_connection(
     connection_id: UUID,
     payload: VectorConnectionUpdate,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)
@@ -103,7 +103,7 @@ async def update_vector_connection(
 )
 async def test_vector_connection(
     connection_id: UUID,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)
@@ -120,7 +120,7 @@ async def test_vector_connection(
 )
 async def delete_vector_connection(
     connection_id: UUID,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)

@@ -29,12 +29,45 @@ class JetKbAdapter:
         top_k: int = 8,
         filters: dict[str, Any] | None = None,
     ) -> list[NormalizedMatch]:
-        _ = filters
         q_emb = embed(query_text)
         kwargs: dict[str, Any] = {
             "vector": q_emb,
             "top_k": top_k,
             "include_metadata": True,
+        }
+        if self.namespace:
+            kwargs["namespace"] = self.namespace
+        if filters:
+            kwargs["filter"] = filters
+
+        result = index.query(**kwargs)
+        matches = getattr(result, "matches", None) or []
+        normalized: list[NormalizedMatch] = []
+        for m in matches:
+            meta = getattr(m, "metadata", None) or {}
+            preview = (meta.get("preview") or "")[:600]
+            normalized.append(
+                NormalizedMatch(
+                    id=str(getattr(m, "id", "")),
+                    score=float(getattr(m, "score", 0.0) or 0.0),
+                    text_preview=preview,
+                    metadata=meta,
+                )
+            )
+        return normalized
+
+    def search_by_metadata_filter(
+        self,
+        filters: dict[str, Any],
+        top_k: int = 50,
+    ) -> list[NormalizedMatch]:
+        """Fetch chunks by metadata filter only (no semantic ranking)."""
+        dim = len(embed(" "))
+        kwargs: dict[str, Any] = {
+            "vector": [0.0] * dim,
+            "top_k": top_k,
+            "include_metadata": True,
+            "filter": filters,
         }
         if self.namespace:
             kwargs["namespace"] = self.namespace
@@ -48,7 +81,7 @@ class JetKbAdapter:
             normalized.append(
                 NormalizedMatch(
                     id=str(getattr(m, "id", "")),
-                    score=float(getattr(m, "score", 0.0) or 0.0),
+                    score=1.0,
                     text_preview=preview,
                     metadata=meta,
                 )

@@ -80,6 +80,45 @@ class PineconeAdapter:
             )
         return normalized
 
+    def search_by_metadata_filter(
+        self,
+        filters: dict[str, Any],
+        top_k: int = 50,
+    ) -> list[NormalizedMatch]:
+        """Fetch chunks by metadata filter only (no semantic ranking)."""
+        dim = self._query_vector_dimension()
+        kwargs: dict[str, Any] = {
+            "vector": [0.0] * dim,
+            "top_k": top_k,
+            "include_metadata": True,
+            "filter": filters,
+        }
+        if self.namespace:
+            kwargs["namespace"] = self.namespace
+
+        result = self.index.query(**kwargs)
+        normalized: list[NormalizedMatch] = []
+        for m in result.matches or []:
+            meta = getattr(m, "metadata", None) or {}
+            preview = (meta.get("preview") or meta.get("text") or "")[:600]
+            normalized.append(
+                NormalizedMatch(
+                    id=str(getattr(m, "id", "")),
+                    score=1.0,
+                    text_preview=preview,
+                    metadata=meta,
+                )
+            )
+        return normalized
+
+    def _query_vector_dimension(self) -> int:
+        if self.index_dimension is not None:
+            try:
+                return int(self.index_dimension)
+            except (TypeError, ValueError):
+                pass
+        return len(embed_query("", self.config))
+
     def test_connection(self) -> tuple[bool, str]:
         try:
             _ = self.search("test connection", top_k=1)

@@ -10,3 +10,15 @@ class UserRepository:
             )
             .first()
         )
+
+    @staticmethod
+    def get_active_by_firebase_uid(firebase_uid: str, db):
+        return (
+            db.query(UserModel)
+            .filter(
+                UserModel.firebase_uid == firebase_uid,
+                UserModel.is_active.is_(True),
+                UserModel.deleted_at.is_(None),
+            )
+            .first()
+        )

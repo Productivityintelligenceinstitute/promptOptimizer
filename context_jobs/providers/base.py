@@ -55,6 +55,16 @@ class ProviderResponse:
 
 ToolExecutor = Callable[[ToolCall], Awaitable[ToolResult]]
 
+_FATAL_DENIAL_PREFIXES = ("BUDGET_EXCEEDED:",)
+
+
+def is_fatal_tool_denial(result: ToolResult) -> bool:
+    """True when the provider loop should stop retrying tools."""
+    if not result.is_error:
+        return False
+    content = (result.content or "").strip()
+    return any(content.startswith(prefix) for prefix in _FATAL_DENIAL_PREFIXES)
+
 
 class ProviderAdapter(ABC):
     @abstractmethod

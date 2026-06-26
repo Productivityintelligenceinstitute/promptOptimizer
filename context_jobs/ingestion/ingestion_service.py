@@ -37,6 +37,12 @@ def _log_step(step: str, seconds: float, **extra: Any) -> None:
 
 from context_jobs.ingestion.chunk_processor import chunk_documents
 from context_jobs.ingestion.config import merge_ingestion_config
+from context_jobs.ingestion.metadata import normalize_document_metadata
+from context_jobs.ingestion.metadata_inference import (
+    infer_document_metadata_from_llm,
+    merge_inferred_metadata,
+)
+from context_jobs.text_sanitize import sanitize_db_text, sanitize_for_db
 from context_jobs.ingestion.embedding_processor import embed_chunks
 from context_jobs.ingestion.pipeline import (
     build_upsert_records,
@@ -45,7 +51,7 @@ from context_jobs.ingestion.pipeline import (
     map_upsert_failure,
 )
 from context_jobs.ingestion.target_resolver import resolve_ingestion_target
-from context_jobs.ingestion.types import IngestionResult
+from context_jobs.ingestion.types import IngestionResult, IngestionTarget
 from context_jobs.ingestion.validation import (
     ValidationCheck,
     check_quota_error,
@@ -56,21 +62,54 @@ from context_jobs.ingestion.validation import (
 from schemas.context_jobs_model import ContextJobModel
 
 
+def _coerce_metadata(metadata: Any) -> dict[str, Any] | None:
+    if metadata is None:
+        return None
+    if isinstance(metadata, str):
+        return {"name": metadata, "title": metadata}
+    if hasattr(metadata, "model_dump"):
+        dumped = metadata.model_dump(by_alias=True, exclude_none=True)
+        return dumped if dumped else None
+    if isinstance(metadata, dict):
+        doc_name = (
+            metadata.get("name")
+            or metadata.get("documentName")
+            or metadata.get("document_name")
+            or metadata.get("title")
+        )
+        return {"name": doc_name, "title": doc_name} if doc_name else None
+    return None
+
+
 def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
-    """Accept dicts or Pydantic models from the API layer."""
+    """Accept dicts or Pydantic models; infer metadata via LLM, then normalize for upsert."""
     normalized: list[dict[str, Any]] = []
     for item in documents:
         if hasattr(item, "model_dump"):
-            d = item.model_dump()
+            d = item.model_dump(by_alias=True, exclude_none=True)
         elif isinstance(item, dict):
-            d = item
+            d = dict(item)
         else:
             d = {"text": str(item), "metadata": None, "id": None}
+
+        doc_id = d.get("id")
+        text = sanitize_db_text(d.get("text") or "").strip()
+        client_meta = sanitize_for_db(_coerce_metadata(d.get("metadata")))
+        title_hint = None
+        if isinstance(client_meta, dict):
+            title_hint = client_meta.get("title") or client_meta.get("name")
+        inferred = infer_document_metadata_from_llm(text, title_hint=title_hint)
+        merged_meta = merge_inferred_metadata(client_meta, inferred)
+        meta = normalize_document_metadata(
+            merged_meta,
+            doc_id=doc_id,
+            text=text,
+        )
         normalized.append(
             {
-                "text": (d.get("text") or "").strip(),
-                "metadata": d.get("metadata"),
-                "id": d.get("id"),
+                "text": text,
+                "metadata": meta,
+                "id": doc_id,
             }
         )
     return normalized
@@ -99,6 +138,17 @@ def ingest_documents(
     ingestion_config: dict[str, Any] | None = None,
 ) -> IngestionResult:
     """Ingest documents into the job's vector target (managed Jet KB or external connection)."""
+    target = resolve_ingestion_target(db, job)
+    return ingest_to_target(target, documents, db, ingestion_config=ingestion_config)
+
+
+def ingest_to_target(
+    target: IngestionTarget,
+    documents: list[Any],
+    db: Session,
+    ingestion_config: dict[str, Any] | None = None,
+) -> IngestionResult:
+    """Ingest documents into a resolved vector target."""
     cfg = merge_ingestion_config(ingestion_config)
     documents = _normalize_documents(documents)
     auto_create = bool(cfg["auto_create_target"])
@@ -109,13 +159,11 @@ def ingest_documents(
     validation_events: list[dict[str, Any]] = []
     warnings: list[str] = []
     exceptions: list[dict[str, Any]] = []
-    target = None
     t_total = time.perf_counter()
     total_chars = sum(len((d.get("text") or "")) for d in documents)
 
     try:
         t0 = time.perf_counter()
-        target = resolve_ingestion_target(db, job)
         adapter = target.adapter
         _log_step(
             "resolve_target",
@@ -239,6 +287,20 @@ def ingest_documents(
         if upsert_result.warnings:
             warnings.extend(upsert_result.warnings)
 
+        ingested_sources = [
+            {
+                "id": doc.get("id"),
+                "label": (doc.get("metadata") or {}).get("file"),
+                "contractId": (doc.get("metadata") or {}).get("contractId"),
+                "vendor": (doc.get("metadata") or {}).get("vendor"),
+                "vendorId": (doc.get("metadata") or {}).get("vendorId"),
+                "capabilities": (doc.get("metadata") or {}).get("capabilities"),
+                "expiryDate": (doc.get("metadata") or {}).get("expiryDate"),
+                "documentType": (doc.get("metadata") or {}).get("documentType"),
+            }
+            for doc in documents
+        ]
+
         has_warnings = bool(warnings)
         _log_step(
             "ingest_total",
@@ -258,6 +320,7 @@ def ingest_documents(
             failed_count=upsert_result.failed_count,
             validation_events=validation_events,
             warnings=warnings,
+            ingested_sources=ingested_sources,
         )
 
     except ValueError as exc:

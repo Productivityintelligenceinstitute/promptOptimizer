@@ -73,6 +73,47 @@ def list_llm_keys(db: Session, owner: str) -> list[LlmProviderKeyModel]:
     )
 
 
+def get_active_llm_key_for_provider(
+    db: Session,
+    owner: str,
+    provider: str,
+) -> Optional[LlmProviderKeyModel]:
+    """Most recently updated active BYOK key for owner + provider (openai, google, anthropic)."""
+    provider = provider.lower().strip()
+    return (
+        db.query(LlmProviderKeyModel)
+        .filter(
+            LlmProviderKeyModel.owner == owner,
+            LlmProviderKeyModel.provider == provider,
+            LlmProviderKeyModel.status == "active",
+        )
+        .order_by(LlmProviderKeyModel.updated_at.desc())
+        .first()
+    )
+
+
+def resolve_llm_key_id_for_provider(
+    db: Session,
+    owner: str,
+    provider: str,
+    llm_key_id: Optional[UUID] = None,
+) -> UUID:
+    """
+    Use explicit llmKeyId when provided; otherwise the user's active key for that provider.
+    """
+    if llm_key_id:
+        return llm_key_id
+    provider = provider.lower().strip()
+    row = get_active_llm_key_for_provider(db, owner, provider)
+    if not row:
+        display = PROVIDER_REGISTRY.get(provider, {}).get("display_name", provider)
+        raise ValueError(
+            f"No active BYOK key configured for {display}. "
+            "Add a key via POST /context-jobs/llm-keys or set llmKeyId on this job."
+        )
+    return row.id
+
+
 def create_llm_key(db: Session, owner: str, data: LlmKeyCreate) -> LlmProviderKeyModel:
     provider = data.provider.lower().strip()
     if provider not in PROVIDER_REGISTRY:
@@ -154,8 +195,13 @@ def resolve_llm_api_key(
     owner: str,
     llm_key_id: Optional[UUID],
     execution_provider: Optional[str] = None,
+    *,
+    package_name: Optional[str] = None,
 ) -> tuple[str, str]:
     import os
+
+    from context_jobs.plan_entitlements import ensure_context_jobs_access
+    from repositories.user_repository import UserRepository
 
     provider_env_map = {
         "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
@@ -163,12 +209,24 @@ def resolve_llm_api_key(
         "google": os.environ.get("GEMINI_API_KEY"),
     }
 
+    user = UserRepository.get_active_by_firebase_uid(owner, db)
+    is_admin = bool(user and user.role and str(user.role).lower() == "admin")
+    if not is_admin:
+        if not user:
+            raise ValueError("User not found. Please create an account first.")
+        if package_name is None:
+            package_name = ensure_context_jobs_access(db, user)
+        if package_name == "trial":
+            llm_key_id = None
+        elif package_name == "pro" and not llm_key_id:
+            provider = (execution_provider or "openai").lower().strip()
+            llm_key_id = resolve_llm_key_id_for_provider(db, owner, provider)
+
     if not llm_key_id:
         provider = (execution_provider or "").lower().strip()
         if provider and provider_env_map.get(provider):
             return provider, provider_env_map[provider]
 
-        # Platform key fallback
         for provider, env_key in provider_env_map.items():
             if env_key:
                 return provider, env_key
@@ -254,16 +312,29 @@ def resolve_tool_api_key(db: Session, owner: str, tool_id: str) -> str:
     return decrypt_api_key(row.encrypted_key)
 
 
-def list_provider_catalog(db: Session, owner: str) -> list[dict]:
+def list_provider_catalog(
+    db: Session,
+    owner: str,
+    *,
+    package_name: Optional[str] = None,
+) -> list[dict]:
+    from context_jobs.plan_entitlements import trial_provider_catalog
+
+    if package_name == "trial":
+        return trial_provider_catalog()
+
     user_keys = {k.provider for k in list_llm_keys(db, owner)}
     catalog = []
     for provider, meta in PROVIDER_REGISTRY.items():
+        if package_name == "pro" and provider not in user_keys:
+            continue
+        models = meta["models"]
         catalog.append(
             {
                 "provider": provider,
                 "displayName": meta["display_name"],
                 "models": [
-                    {"id": m, "displayName": m} for m in meta["models"]
+                    {"id": m, "displayName": m} for m in models
                 ],
                 "hasUserKey": provider in user_keys,
             }

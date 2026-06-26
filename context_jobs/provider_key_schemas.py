@@ -90,3 +90,37 @@ class ToolInfo(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class EntitlementsLimits(BaseModel):
+    max_jobs: int = Field(..., alias="maxJobs")
+    max_runs: int = Field(..., alias="maxRuns")
+
+    class Config:
+        populate_by_name = True
+
+
+class EntitlementsUsage(BaseModel):
+    jobs: int
+    runs: int
+
+
+class SelectableProviderInfo(ProviderInfo):
+    selectable: bool = True
+
+
+class ContextJobsEntitlementsOut(BaseModel):
+    user_id: Optional[str] = Field(None, alias="userId")
+    plan: Optional[str] = None
+    context_jobs_enabled: bool = Field(..., alias="contextJobsEnabled")
+    message: Optional[str] = None
+    upgrade_required: Optional[str] = Field(None, alias="upgradeRequired")
+    key_mode: Optional[str] = Field(None, alias="keyMode")
+    limits: Optional[EntitlementsLimits] = None
+    usage: Optional[EntitlementsUsage] = None
+    can_create_job: bool = Field(..., alias="canCreateJob")
+    can_create_run: bool = Field(..., alias="canCreateRun")
+    providers: list[SelectableProviderInfo] = Field(default_factory=list)
+
+    class Config:
+        populate_by_name = True

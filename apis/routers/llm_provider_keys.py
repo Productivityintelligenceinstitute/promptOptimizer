@@ -7,9 +7,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from context_jobs.auth import get_context_jobs_owner, get_context_jobs_owner_with_access
 from context_jobs import provider_key_services as key_services
-from context_jobs.auth import get_authenticated_user_id
+from context_jobs.errors import raise_context_jobs_http
+from context_jobs.plan_entitlements import (
+    assert_byok_llm_keys_allowed,
+    build_entitlements,
+    ensure_context_jobs_access,
+)
 from context_jobs.provider_key_schemas import (
+    ContextJobsEntitlementsOut,
     LlmKeyCreate,
     LlmKeyOut,
     ProviderInfo,
@@ -22,9 +29,21 @@ from database import database
 provider_keys_router = APIRouter(prefix="/context-jobs")
 
 
+def _require_pro_byok_keys(
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+) -> str:
+    """Pro-only BYOK key routes (trial uses platform keys; essential blocked upstream)."""
+    try:
+        assert_byok_llm_keys_allowed(db, owner)
+    except Exception as exc:
+        raise_context_jobs_http(exc)
+    return owner
+
+
 @provider_keys_router.get("/llm-keys", response_model=list[LlmKeyOut], tags=["Context Jobs"])
 async def list_llm_keys(
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     return key_services.list_llm_keys(db, owner)
@@ -38,7 +57,7 @@ async def list_llm_keys(
 )
 async def create_llm_key(
     payload: LlmKeyCreate,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -50,7 +69,7 @@ async def create_llm_key(
 @provider_keys_router.delete("/llm-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Context Jobs"])
 async def revoke_llm_key(
     key_id: UUID,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -63,7 +82,7 @@ async def revoke_llm_key(
 @provider_keys_router.post("/llm-keys/{key_id}/verify", response_model=LlmKeyOut, tags=["Context Jobs"])
 async def verify_llm_key(
     key_id: UUID,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -74,7 +93,7 @@ async def verify_llm_key(
 
 @provider_keys_router.get("/tool-keys", response_model=list[ToolKeyOut], tags=["Context Jobs"])
 async def list_tool_keys(
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     return key_services.list_tool_keys(db, owner)
@@ -88,7 +107,7 @@ async def list_tool_keys(
 )
 async def create_tool_key(
     payload: ToolKeyCreate,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -100,7 +119,7 @@ async def create_tool_key(
 @provider_keys_router.delete("/tool-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Context Jobs"])
 async def revoke_tool_key(
     key_id: UUID,
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -110,17 +129,31 @@ async def revoke_tool_key(
     return None
 
 
-@provider_keys_router.get("/providers", response_model=list[ProviderInfo], tags=["Context Jobs"])
-async def list_providers(
-    owner: str = Depends(get_authenticated_user_id),
+@provider_keys_router.get(
+    "/entitlements",
+    response_model=ContextJobsEntitlementsOut,
+    tags=["Context Jobs"],
+)
+async def get_context_jobs_entitlements(
+    owner: str = Depends(get_context_jobs_owner),
     db: Session = Depends(database.get_db),
 ):
-    return key_services.list_provider_catalog(db, owner)
+    # UI gating: return plan-aware payload for every package (including essential).
+    return build_entitlements(db, owner)
+
+
+@provider_keys_router.get("/providers", response_model=list[ProviderInfo], tags=["Context Jobs"])
+async def list_providers(
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+):
+    package_name = ensure_context_jobs_access(db, owner)
+    return key_services.list_provider_catalog(db, owner, package_name=package_name)
 
 
 @provider_keys_router.get("/tools", response_model=list[ToolInfo], tags=["Context Jobs"])
 async def list_tools(
-    owner: str = Depends(get_authenticated_user_id),
+    owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
     return key_services.list_tool_catalog(db, owner)

@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from context_jobs.agents.types import SubAgentDefinition
+from context_jobs.assembly.prompt_safety import (
+    append_prompt_injection_policy,
+    assemble_delegate_user_message,
+)
 from context_jobs.gateway.budget_tracker import BudgetTracker
 from context_jobs.gateway.guardrail_gateway import GatewayToolExecutor
 from context_jobs.providers.base import ExecutionEnvelope, ToolDefinition
@@ -50,8 +54,8 @@ class AgentDelegateRunner:
         )
 
         envelope = ExecutionEnvelope(
-            system_prompt=spec.system_prompt,
-            user_message=task.strip(),
+            system_prompt=append_prompt_injection_policy(spec.system_prompt),
+            user_message=assemble_delegate_user_message(task),
             tools=specialist_tools,
             max_tokens=int((self.job.budget_settings or {}).get("maxTokens") or 4096),
             max_turns=spec.max_turns,

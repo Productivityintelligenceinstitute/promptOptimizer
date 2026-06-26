@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from context_jobs.agents.catalog import build_delegate_tool_definition, compile_agent_catalog, is_multi_agent_mode
 from context_jobs.agents.delegate_runner import AgentDelegateRunner
 import context_jobs.audit as cj_audit
 from context_jobs.assembly.memory_loader import load_memory_context
 from context_jobs.assembly.prompt_builder import assemble_user_message, build_system_prompt
+from context_jobs.assembly.output_format import clean_model_output
+from context_jobs.assembly.prompt_safety import build_trusted_repair_instruction
 from context_jobs.assembly.retrieval_pipeline import execute_retrieval
+from context_jobs.ingestion.metadata import extract_retrieval_hints
 from context_jobs.assembly.tool_resolver import resolve_tools
 from context_jobs.gateway.budget_tracker import BudgetTracker
+from context_jobs.gateway.execution_limits import (
+    resolve_budget_settings,
+    resolve_max_agent_turns,
+    resolve_per_request_max_tokens,
+)
 from context_jobs.gateway.guardrail_gateway import GatewayToolExecutor
 from context_jobs.memory.memory_service import persist_memory_updates
 from context_jobs.provider_key_services import resolve_llm_api_key
@@ -24,15 +36,19 @@ from context_jobs.providers.base import ExecutionEnvelope
 from context_jobs.providers.registry import get_default_model, get_provider_adapter
 from context_jobs.rop.builder import build_run_output_package, determine_terminal_state
 from context_jobs.run_workflows import (
-    build_repair_user_message,
     build_replay_snapshot,
+    list_tool_executions,
     should_attempt_repair,
 )
+from context_jobs.validation.tool_output import merge_tool_execution_sources
 from context_jobs.structured_output import extract_structured_output
+from context_jobs.text_sanitize import sanitize_db_text
 from context_jobs.validation.engine import run_validation
 from context_jobs.workspace import default_workspace_id, ensure_default_workspace
 from database.database import SessionLocal
 from schemas.context_jobs_model import ContextJobModel, ContextJobVersionModel, JobRunModel
+
+logger = logging.getLogger(__name__)
 
 
 def execute_run_sync(run_id: UUID) -> None:
@@ -83,7 +99,8 @@ async def _execute_run_async(run_id: UUID) -> None:
         db.add(run)
         db.commit()
 
-        budget_tracker = BudgetTracker(job.budget_settings or {})
+        budget_settings = resolve_budget_settings(job)
+        budget_tracker = BudgetTracker(budget_settings)
 
         try:
             await _run_stage(db, run, "planning", "Assembling context from job definition")
@@ -97,7 +114,16 @@ async def _execute_run_async(run_id: UUID) -> None:
             _complete_stage(db, run)
 
             await _run_stage(db, run, "retrieving", "Executing retrieval pipeline")
-            retrieval = execute_retrieval(job, run.user_request or "", db)
+            combined_for_hints = f"{job.goal or ''}\n\n{run.user_request or ''}".strip()
+            retrieval_hints = extract_retrieval_hints(combined_for_hints)
+            if (job.workflow_type or "").lower() in {"contract_review", "analysis", "procurement"}:
+                retrieval_hints.setdefault("contractRenewal", True)
+            retrieval = execute_retrieval(
+                job,
+                run.user_request or "",
+                db,
+                retrieval_hints=retrieval_hints,
+            )
             run.retrieval_events = retrieval.retrieval_events
             run.source_trace_events = retrieval.source_trace_events
             db.add(run)
@@ -131,10 +157,16 @@ async def _execute_run_async(run_id: UUID) -> None:
             response, tool_executor = await _execute_with_provider(
                 db, run, job, provider, model, api_key, system_prompt, user_message,
                 tools, agent_catalog, delegate_runner, budget_tracker,
+                retrieved_context=retrieval.rag_context,
             )
 
             validation_summary, events = await _validate_output(
-                db, run, job, response.content or "", retrieval.source_trace_events
+                db,
+                run,
+                job,
+                response.content or "",
+                retrieval.source_trace_events,
+                tool_executor=tool_executor,
             )
 
             # Repair loop: one retry on needs_repair
@@ -148,21 +180,27 @@ async def _execute_run_async(run_id: UUID) -> None:
                     "executing",
                     f"Repair attempt {run.repair_cycles}",
                 )
-                repair_message = build_repair_user_message(
-                    run.user_request or job.goal or "",
+                repair_message = build_trusted_repair_instruction(
                     validation_summary.repair_reason,
                 )
                 user_message = assemble_user_message(
-                    repair_message,
+                    run.user_request or job.goal or "",
                     retrieval.rag_context,
                     memory_context,
+                    trusted_suffix=repair_message,
                 )
                 response, tool_executor = await _execute_with_provider(
                     db, run, job, provider, model, api_key, system_prompt, user_message,
                     tools, agent_catalog, delegate_runner, budget_tracker,
+                    retrieved_context=retrieval.rag_context,
                 )
                 validation_summary, events = await _validate_output(
-                    db, run, job, response.content or "", retrieval.source_trace_events
+                    db,
+                    run,
+                    job,
+                    response.content or "",
+                    retrieval.source_trace_events,
+                    tool_executor=tool_executor,
                 )
                 _complete_stage(db, run)
 
@@ -200,6 +238,7 @@ async def _execute_run_async(run_id: UUID) -> None:
             run.workspace_id = getattr(job, "workspace_id", None) or default_workspace_id(job.owner or "")
             run.ended_at = ended_at
             run.latency_ms = int((ended_at - started_at).total_seconds() * 1000)
+            _finalize_running_step_logs(run)
             db.add(run)
             db.commit()
 
@@ -232,8 +271,34 @@ async def _execute_run_async(run_id: UUID) -> None:
                 db.add(run)
                 db.commit()
 
+            db.refresh(run)
+            if run.state == "completed":
+                try:
+                    from context_jobs.chain_runner import evaluate_chain
+
+                    evaluate_chain(run.id, run.run_output_package or rop, db)
+                except Exception:
+                    logger.exception("Chain evaluation failed for run %s", run.id)
+
+            chain_status = None
+            if run.state in ("completed", "completed_with_warnings"):
+                chain_status = "completed"
+            elif run.state in ("escalated", "failed"):
+                chain_status = "failed"
+            if chain_status is not None:
+                try:
+                    db.execute(
+                        text(
+                            "UPDATE run_chains SET status = :status WHERE child_run_id = :run_id"
+                        ),
+                        {"status": chain_status, "run_id": run.id},
+                    )
+                    db.commit()
+                except Exception:
+                    logger.exception("RunChain status update failed for run %s", run.id)
+
         except Exception as exc:
-            _fail_run(db, run, str(exc))
+            _fail_run(db, run.id, str(exc))
 
     finally:
         db.close()
@@ -252,13 +317,15 @@ async def _execute_with_provider(
     agent_catalog,
     delegate_runner,
     budget_tracker: BudgetTracker,
+    retrieved_context: str = "",
 ) -> tuple[Any, GatewayToolExecutor]:
+    budget_settings = resolve_budget_settings(job)
     envelope = ExecutionEnvelope(
         system_prompt=system_prompt,
         user_message=user_message,
         tools=tools,
-        max_tokens=int((job.budget_settings or {}).get("maxTokens") or 4096),
-        max_turns=int(job.max_agent_turns or 10),
+        max_tokens=resolve_per_request_max_tokens(budget_settings),
+        max_turns=resolve_max_agent_turns(job),
         temperature=0.2,
         model=model,
         metadata={"job_id": str(job.id), "run_id": str(run.id), "owner": job.owner},
@@ -271,12 +338,15 @@ async def _execute_with_provider(
         agent_catalog=agent_catalog,
         delegate_runner=delegate_runner,
         allow_delegation=bool(delegate_runner),
+        retrieved_context=retrieved_context,
     )
     adapter = get_provider_adapter(provider)
     response = await adapter.execute(envelope, api_key, tool_executor)
     budget_tracker.record_tokens(response.input_tokens, response.output_tokens, response.model)
 
-    run.output_text = response.content
+    cleaned_content = clean_model_output(response.content or "", job)
+    response = replace(response, content=cleaned_content)
+    run.output_text = cleaned_content
     run.execution_provider = provider
     run.execution_model = response.model
     run.total_provider_tokens = response.input_tokens + response.output_tokens
@@ -301,12 +371,20 @@ async def _validate_output(
     job: ContextJobModel,
     output_text: str,
     source_traces: list,
+    tool_executor: GatewayToolExecutor | None = None,
 ) -> tuple[Any, list]:
     await _run_stage(db, run, "validating", "Running validation rules")
+    memory_outputs = getattr(tool_executor, "tool_outputs", None) if tool_executor else None
+    tool_executions = merge_tool_execution_sources(
+        list_tool_executions(db, run.id),
+        memory_outputs,
+    )
     events, validation_summary = await run_validation(
         output_text=output_text,
         job=job,
         source_traces=source_traces,
+        tool_executions=tool_executions,
+        tool_events=run.tool_events or [],
     )
     run.validation_events = [
         {
@@ -341,7 +419,7 @@ async def _run_stage(db: Session, run: JobRunModel, step_name: str, details: str
     run = db.query(JobRunModel).filter(JobRunModel.id == run.id).first()
     if not run:
         return
-    logs = list(run.step_logs or [])
+    logs = [dict(log) if isinstance(log, dict) else log for log in (run.step_logs or [])]
     logs.append(
         {
             "step": step_name,
@@ -352,6 +430,7 @@ async def _run_stage(db: Session, run: JobRunModel, step_name: str, details: str
     )
     run.state = step_name
     run.step_logs = logs
+    flag_modified(run, "step_logs")
     db.add(run)
     db.commit()
 
@@ -360,25 +439,55 @@ def _complete_stage(db: Session, run: JobRunModel) -> None:
     run = db.query(JobRunModel).filter(JobRunModel.id == run.id).first()
     if not run:
         return
-    logs = list(run.step_logs or [])
+    logs = [dict(log) if isinstance(log, dict) else log for log in (run.step_logs or [])]
     if logs:
-        logs[-1]["status"] = "completed"
-        logs[-1]["endedAt"] = datetime.now(timezone.utc).isoformat()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        logs[-1] = {**logs[-1], "status": "completed", "endedAt": ended_at}
     run.step_logs = logs
+    flag_modified(run, "step_logs")
     db.add(run)
     db.commit()
 
 
-def _fail_run(db: Session, run: JobRunModel, message: str) -> None:
-    run.state = "failed"
-    run.outcome = "error"
-    run.ended_at = datetime.now(timezone.utc)
-    run.run_output_package = {
+def _finalize_running_step_logs(run_row: JobRunModel) -> None:
+    """Mark any step logs still running as completed when the run reaches a terminal state."""
+    logs = [dict(log) if isinstance(log, dict) else log for log in (run_row.step_logs or [])]
+    if not logs:
+        return
+    ended_at = datetime.now(timezone.utc).isoformat()
+    changed = False
+    for index, log in enumerate(logs):
+        if isinstance(log, dict) and log.get("status") == "running":
+            logs[index] = {**log, "status": "completed", "endedAt": log.get("endedAt") or ended_at}
+            changed = True
+    if not changed:
+        return
+    run_row.step_logs = logs
+    flag_modified(run_row, "step_logs")
+
+
+def _fail_run(db: Session, run: JobRunModel | UUID, message: str) -> None:
+    run_id = run.id if isinstance(run, JobRunModel) else run
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+    safe_message = sanitize_db_text(message)
+    run_row = db.query(JobRunModel).filter(JobRunModel.id == run_id).first()
+    if not run_row:
+        return
+
+    step_logs = [dict(log) if isinstance(log, dict) else log for log in (run_row.step_logs or [])]
+    run_row.state = "failed"
+    run_row.outcome = "error"
+    run_row.ended_at = datetime.now(timezone.utc)
+    run_row.run_output_package = {
         "status": "failed",
         "primaryResult": {
             "resultType": "text_output",
             "title": "Run failed",
-            "content": message,
+            "content": safe_message,
         },
         "validationSummary": {
             "overallDecision": "failed",
@@ -391,32 +500,32 @@ def _fail_run(db: Session, run: JobRunModel, message: str) -> None:
             {
                 "code": "RUNTIME_FAILURE",
                 "severity": "critical",
-                "message": message,
+                "message": safe_message,
                 "relatedStep": "executing",
                 "suggestedAction": "Retry when issue is resolved",
             }
         ],
         "nextAction": {"type": "retry_later", "label": "Retry when issue is resolved"},
         "traceSummary": {
-            "stages": [log.get("step") for log in (run.step_logs or []) if isinstance(log, dict)],
-            "toolEvents": len(run.tool_events or []),
-            "retrievalEvents": len(run.retrieval_events or []),
-            "repairCycles": 0,
+            "stages": [log.get("step") for log in step_logs if isinstance(log, dict)],
+            "toolEvents": len(run_row.tool_events or []),
+            "retrievalEvents": len(run_row.retrieval_events or []),
+            "repairCycles": int(getattr(run_row, "repair_cycles", None) or 0),
             "replayAvailable": True,
         },
         "memoryStateChanges": {"updated": False, "changes": []},
         "costTimeSummary": {
-            "startedAt": (run.started_at or datetime.now(timezone.utc)).isoformat(),
+            "startedAt": (run_row.started_at or datetime.now(timezone.utc)).isoformat(),
             "endedAt": datetime.now(timezone.utc).isoformat(),
             "runtimeSeconds": 0,
             "estimatedCost": "$0.0000",
-            "toolUsageCount": len(run.tool_events or []),
-            "retrievalUsageCount": len(run.retrieval_events or []),
+            "toolUsageCount": len(run_row.tool_events or []),
+            "retrievalUsageCount": len(run_row.retrieval_events or []),
         },
         "auditMetadata": {
-            "runId": str(run.id),
-            "jobId": str(run.job_id),
-            "jobVersion": run.job_version or 1,
+            "runId": str(run_row.id),
+            "jobId": str(run_row.job_id),
+            "jobVersion": run_row.job_version or 1,
             "workspaceId": "default",
             "actor": "unknown",
             "environment": "development",
@@ -424,5 +533,19 @@ def _fail_run(db: Session, run: JobRunModel, message: str) -> None:
             "policyProfile": "default",
         },
     }
-    db.add(run)
-    db.commit()
+    if step_logs:
+        ended_at = datetime.now(timezone.utc).isoformat()
+        step_logs[-1] = {
+            **step_logs[-1],
+            "status": "failed",
+            "endedAt": ended_at,
+            "details": safe_message[:500],
+        }
+        run_row.step_logs = step_logs
+        flag_modified(run_row, "step_logs")
+    _finalize_running_step_logs(run_row)
+    db.add(run_row)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()

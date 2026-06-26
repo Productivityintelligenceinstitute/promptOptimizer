@@ -9,7 +9,8 @@ from typing import Any
 from context_jobs.gateway.budget_tracker import BudgetTracker
 from context_jobs.gateway.guardrail_gateway import GatewayToolExecutor
 from context_jobs.providers.base import ProviderResponse
-from context_jobs.validation.engine import ValidationSummary
+from context_jobs.validation.engine import ValidationSummary, build_weak_evidence_payload, overall_evidence_strength
+from context_jobs.evidence import is_actionable_weak_evidence
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 
 
@@ -22,6 +23,9 @@ RESULT_TYPE_MAP = {
     "extraction": "extracted_fields",
     "review": "recommendation",
     "monitoring": "checklist",
+    "procurement": "procurement_output",
+    "contract_review": "contract_review",
+    "supplier_assessment": "supplier_assessment",
 }
 
 NEXT_ACTION_MAP = {
@@ -90,6 +94,8 @@ def build_run_output_package(
     warnings = []
     for trace in source_traces:
         for code in trace.get("warnings") or []:
+            if code == "WEAK_EVIDENCE" and not is_actionable_weak_evidence(trace):
+                continue
             warnings.append(
                 {
                     "code": code,
@@ -132,7 +138,10 @@ def build_run_output_package(
     if structured_output:
         primary["structuredOutput"] = structured_output
 
-    return {
+    weak_evidence = build_weak_evidence_payload(source_traces)
+    evidence_strength = overall_evidence_strength(source_traces)
+
+    package: dict[str, Any] = {
         "status": status,
         "primaryResult": primary,
         "validationSummary": {
@@ -154,7 +163,7 @@ def build_run_output_package(
                 }
                 for st in source_traces
             ],
-            "overallEvidenceStrength": "sufficient" if grounded_mode else "unavailable",
+            "overallEvidenceStrength": evidence_strength if grounded_mode else "unavailable",
         },
         "warnings": warnings,
         "exceptions": exceptions,
@@ -194,3 +203,6 @@ def build_run_output_package(
         },
         "artifacts": list(getattr(tool_executor, "artifacts", []) or []),
     }
+    if weak_evidence:
+        package["weakEvidence"] = weak_evidence
+    return package

@@ -7,7 +7,7 @@ from schemas.permission_model import PermissionModel
 from schemas.packages_permission_model import PackagesPermissionModel
 from schemas.subscription_model import SubscriptionsModel
 from schemas.usage_log_model import UsageLogModel
-from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel
+from schemas.context_jobs_model import ContextJobModel, ContextAssetModel, JobRunModel, ProcurementAlertModel
 from schemas.context_vector_connection_model import ContextVectorConnectionModel
 from schemas.managed_jet_kb_namespace_model import ManagedJetKbNamespaceModel
 from schemas.llm_provider_key_model import LlmProviderKeyModel
@@ -29,6 +29,7 @@ __all__ = [
     "ContextJobModel",
     "ContextAssetModel",
     "JobRunModel",
+    "ProcurementAlertModel",
     "ContextVectorConnectionModel",
     "ManagedJetKbNamespaceModel",
     "LlmProviderKeyModel",

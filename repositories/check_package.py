@@ -7,17 +7,11 @@ from fastapi import HTTPException
 
 class CheckPackageRepository:
     @staticmethod
-    def check_user_package(db, user_id):
+    def get_active_package_subscription(db, user_id):
         """
-        Ensure the user has an active, time-valid subscription.
-
-        Rules:
-        - If no active subscription exists → 403
-        - If package is "trial" → require end_date >= now (14-day window)
-        - If package is paid (not "free" or "trial") → require start_date <= now <= end_date
-        - If package is "free" → legacy behavior: no time check, allowed
+        Return (package, subscription) for the user's first active subscription, or None.
         """
-        result = (
+        return (
             db.query(PackagesModel, SubscriptionsModel)
             .join(
                 SubscriptionsModel,
@@ -30,17 +24,15 @@ class CheckPackageRepository:
             .first()
         )
 
-        if not result:
-            # No active subscription at all (no trial, no paid, no free)
-            raise HTTPException(
-                status_code=403,
-                detail="No active subscription or trial has expired. Please upgrade your plan to continue.",
-            )
+    @staticmethod
+    def validate_package_subscription(package, subscription) -> None:
+        """
+        Ensure a package/subscription pair is currently valid.
 
-        package, subscription = result
+        Raises HTTPException(403) when invalid.
+        """
         now = datetime.now(timezone.utc)
 
-        # New behavior: 14-day trial must be within its validity window
         if package.package_name == "trial":
             if not subscription.end_date or subscription.end_date < now:
                 raise HTTPException(
@@ -49,7 +41,6 @@ class CheckPackageRepository:
                 )
             return
 
-        # Paid subscriptions (e.g., essential, pro) must be currently valid
         if package.package_name != "free":
             if (
                 not subscription.start_date
@@ -64,5 +55,26 @@ class CheckPackageRepository:
             return
 
         # Legacy free plan: keep existing behavior (no time-based restriction)
-        # Users on the historical free tier are allowed to proceed.
         return
+
+    @staticmethod
+    def check_user_package(db, user_id):
+        """
+        Ensure the user has an active, time-valid subscription.
+
+        Rules:
+        - If no active subscription exists → 403
+        - If package is "trial" → require end_date >= now (14-day window)
+        - If package is paid (not "free" or "trial") → require start_date <= now <= end_date
+        - If package is "free" → legacy behavior: no time check, allowed
+        """
+        result = CheckPackageRepository.get_active_package_subscription(db, user_id)
+
+        if not result:
+            raise HTTPException(
+                status_code=403,
+                detail="No active subscription or trial has expired. Please upgrade your plan to continue.",
+            )
+
+        package, subscription = result
+        CheckPackageRepository.validate_package_subscription(package, subscription)

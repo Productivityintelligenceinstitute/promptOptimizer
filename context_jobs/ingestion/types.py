@@ -64,6 +64,7 @@ class IngestionResult:
     warnings: list[str] = field(default_factory=list)
     exceptions: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    ingested_sources: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,4 +77,5 @@ class IngestionResult:
             "warnings": self.warnings,
             "exceptions": self.exceptions,
             "error": self.error,
+            "ingestedSources": self.ingested_sources,
         }

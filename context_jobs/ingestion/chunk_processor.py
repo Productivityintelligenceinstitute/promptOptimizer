@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from context_jobs.ingestion.metadata import normalize_document_metadata
+from context_jobs.text_sanitize import sanitize_db_text
 from utils.chunking import chunk_text as platform_chunk_text
 
 
@@ -30,8 +32,13 @@ def chunk_documents(
     chunked = []
 
     for doc_idx, doc in enumerate(documents):
-        text = doc.get("text", "").strip()
-        base_metadata = doc.get("metadata") or {}
+        text = sanitize_db_text(doc.get("text", "")).strip()
+        doc_id = doc.get("id") or f"doc_{doc_idx}"
+        base_metadata = normalize_document_metadata(
+            doc.get("metadata"),
+            doc_id=doc_id,
+            text=text,
+        )
 
         if not text:
             continue
@@ -39,17 +46,18 @@ def chunk_documents(
         chunks = platform_chunk_text(text, max_chars=chunk_size, overlap=chunk_overlap)
 
         for chunk_idx, chunk in enumerate(chunks):
+            clean_chunk = sanitize_db_text(chunk)
             chunked.append(
                 {
-                    "text": chunk,
+                    "text": clean_chunk,
                     "metadata": {
                         **base_metadata,
                         "chunk_index": chunk_idx,
                         "total_chunks": len(chunks),
-                        "source_doc_id": doc.get("id") or f"doc_{doc_idx}",
+                        "source_doc_id": doc_id,
                     },
                     "chunk_index": chunk_idx,
-                    "source_doc_id": doc.get("id") or f"doc_{doc_idx}",
+                    "source_doc_id": doc_id,
                 }
             )
 

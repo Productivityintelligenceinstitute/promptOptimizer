@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from context_jobs.evidence import is_placeholder_source_name, is_placeholder_source_text
 from schemas.context_jobs_model import ContextAssetModel, ContextJobModel
 
 
@@ -126,6 +127,8 @@ def retrieve_from_knowledge_sources(
             }
         )
         strength = "strong" if m.score >= 0.5 else "moderate" if m.score >= 0.25 else "weak"
+        if is_placeholder_source_name(m.source_name) or is_placeholder_source_text(m.text):
+            strength = "informational"
         source_trace_events.append(
             {
                 "sourceId": m.source_id,
@@ -134,7 +137,7 @@ def retrieve_from_knowledge_sources(
                 "factsCited": 1,
                 "trustLevel": "preferred",
                 "freshnessStatus": "current",
-                "warnings": ["WEAK_EVIDENCE"] if strength == "weak" else [],
+                "warnings": [],
                 "evidenceStrength": strength,
             }
         )

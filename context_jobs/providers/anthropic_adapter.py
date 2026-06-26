@@ -14,6 +14,7 @@ from context_jobs.providers.base import (
     ToolCall,
     ToolDefinition,
     ToolExecutor,
+    is_fatal_tool_denial,
 )
 
 
@@ -86,6 +87,7 @@ class ClaudeAdapter(ProviderAdapter):
 
             messages.append({"role": "assistant", "content": response.content})
             tool_results = []
+            fatal_denial = False
             for block in tool_blocks:
                 args = block.input if isinstance(block.input, dict) else {}
                 result = await tool_executor(
@@ -104,7 +106,18 @@ class ClaudeAdapter(ProviderAdapter):
                         "is_error": result.is_error,
                     }
                 )
+                if is_fatal_tool_denial(result):
+                    fatal_denial = True
             messages.append({"role": "user", "content": tool_results})
+            if fatal_denial:
+                return ProviderResponse(
+                    content="Agent stopped: run budget exceeded.",
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    model=envelope.model,
+                    stop_reason="budget_exceeded",
+                    agent_turns=turns,
+                )
 
         return ProviderResponse(
             content="Agent stopped: maximum turns reached.",

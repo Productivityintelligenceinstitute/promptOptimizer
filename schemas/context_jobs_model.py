@@ -1,5 +1,5 @@
 from database import database
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, Numeric, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, Numeric, ForeignKey, UniqueConstraint, Date
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import uuid
@@ -34,6 +34,7 @@ class ContextJobModel(database.Base):
     glossary_terms = Column(JSONB, nullable=True)
     relationships = Column(JSONB, nullable=True)
     trusted_sources = Column(JSONB, nullable=True)
+    chain_config = Column(JSONB, nullable=True)
     version = Column(Integer, nullable=False, default=1)
     owner = Column(String, nullable=True, default="current_user")
     approval_required = Column(Boolean, nullable=False, default=False)
@@ -203,4 +204,43 @@ class JobRunModel(database.Base):
     parent_run_id = Column(UUID(as_uuid=True), nullable=True)
     replay_snapshot = Column(JSONB, nullable=True)
     workspace_id = Column(String, nullable=True)
+
+
+class ProcurementAlertModel(database.Base):
+    __tablename__ = "procurement_alerts"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        nullable=False,
+        default=uuid.uuid4,
+    )
+    owner = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=True)
+    vendor = Column(String, nullable=True)
+    contract_document_id = Column(String, nullable=False, index=True)
+    expiry_date = Column(Date, nullable=False)
+    complexity_tier = Column(String, nullable=False)
+    lead_months_threshold = Column(Integer, nullable=False)
+    complexity_tier_defaulted = Column(Boolean, nullable=False, default=False)
+    alerted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    dismissed = Column(Boolean, nullable=False, default=False, index=True)
+    suggested_job_id = Column(UUID(as_uuid=True), nullable=True)
+
+
+class RunChainModel(database.Base):
+    __tablename__ = "run_chains"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        nullable=False,
+        default=uuid.uuid4,
+    )
+    parent_run_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    child_job_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    child_run_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    status = Column(String, nullable=False, default="pending")
+    input_mapping = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

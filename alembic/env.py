@@ -30,6 +30,7 @@ try:
     import schemas.messages_model
     import schemas.library_model
     import schemas.usage_log_model
+    import schemas.context_jobs_model
 except (ImportError, ModuleNotFoundError, ValueError) as e:
     # If import fails (e.g., missing DATABASE_URL, psycopg2, or invalid URL), 
     # we can still run manual migrations

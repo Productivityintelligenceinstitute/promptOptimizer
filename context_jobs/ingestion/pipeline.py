@@ -8,6 +8,7 @@ from typing import Any
 from context_jobs.ingestion.records import ensure_record_ids
 from context_jobs.ingestion.types import UpsertResult
 from context_jobs.ingestion.validation import ValidationCheck, check_quota_error
+from context_jobs.text_sanitize import sanitize_db_text
 
 
 def build_upsert_records(embedded_chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -20,8 +21,9 @@ def build_upsert_records(embedded_chunks: list[dict[str, Any]]) -> list[dict[str
     for idx, emb in enumerate(embedded_chunks):
         meta = dict(emb.get("metadata") or {})
         if emb.get("text"):
-            meta.setdefault("preview", (emb["text"] or "")[:300])
-            meta.setdefault("text", emb["text"])
+            clean_text = sanitize_db_text(emb["text"])
+            meta.setdefault("preview", clean_text[:300])
+            meta.setdefault("text", clean_text)
         rid = emb.get("source_doc_id")
         if rid is not None and emb.get("chunk_index") is not None:
             rid = f"{rid}-chunk-{emb['chunk_index']}"

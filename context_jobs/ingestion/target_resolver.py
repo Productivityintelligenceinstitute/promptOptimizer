@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from context_jobs.vector_connection_services import (
 )
 from core.config import EMBED_MODEL
 from schemas.context_jobs_model import ContextJobModel
+from schemas.context_vector_connection_model import ContextVectorConnectionModel
 
 
 def resolve_ingestion_target(db: Session, job: ContextJobModel) -> IngestionTarget:
@@ -49,18 +51,33 @@ def resolve_ingestion_target(db: Session, job: ContextJobModel) -> IngestionTarg
         )
 
     vector_conn = get_active_connection_for_owner(db, conn_id, owner)
+    return _ingestion_target_from_connection(vector_conn)
+
+
+def resolve_external_ingestion_target(
+    db: Session,
+    owner: str,
+    vector_connection_id: UUID,
+) -> IngestionTarget:
+    """Build an ingestion target from a saved external vector connection (no job required)."""
+    vector_conn = get_active_connection_for_owner(db, vector_connection_id, owner)
+    return _ingestion_target_from_connection(vector_conn)
+
+
+def _ingestion_target_from_connection(
+    vector_conn: ContextVectorConnectionModel,
+) -> IngestionTarget:
+    from context_jobs.retrieval.factory import get_retrieval_adapter
+
     embed_config = decrypt_config(vector_conn.encrypted_config or {})
     provider = (vector_conn.provider or "").lower().strip()
     adapter: VectorIngestionAdapter = get_retrieval_adapter(provider, embed_config)
 
-    target_name = _target_name_for_provider(provider, embed_config)
-    target_dim = _target_dimension_for_provider(provider, embed_config)
-
     return IngestionTarget(
         provider=provider,
         embed_config=embed_config,
-        target_name=target_name,
-        target_dimension=target_dim,
+        target_name=_target_name_for_provider(provider, embed_config),
+        target_dimension=_target_dimension_for_provider(provider, embed_config),
         adapter=adapter,
     )
 

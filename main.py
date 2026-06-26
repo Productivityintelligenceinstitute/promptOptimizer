@@ -25,9 +25,10 @@ from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
 
 from admin.core.ingestion_job import ingest_job
+from context_jobs.errors import register_context_jobs_exception_handlers
 from context_jobs.orchestrator import start_run_workers, stop_run_workers
 from context_jobs.schema_bootstrap import ensure_context_jobs_columns
-from context_jobs.tools.seed_registry import seed_tool_registry
+from database.startup_seed import run_startup_seeds
 from database.database import SessionLocal
 
 from middleware.cors import setup_cors
@@ -76,6 +77,51 @@ if not ingestion_timing_logger.handlers:
 ingestion_timing_logger.setLevel(logging.INFO)
 ingestion_timing_logger.propagate = False
 
+procurement_scheduler = None
+
+
+def _run_procurement_monitor_job() -> None:
+    """Daily contract expiry scan; must not raise to the scheduler."""
+    db = SessionLocal()
+    try:
+        from context_jobs.procurement.monitor import run_contract_expiry_monitor
+
+        run_contract_expiry_monitor(db)
+    except Exception:
+        kb_logger.exception("Procurement contract expiry monitor failed")
+    finally:
+        db.close()
+
+
+def _start_procurement_scheduler() -> None:
+    global procurement_scheduler
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(
+            _run_procurement_monitor_job,
+            trigger="interval",
+            days=1,
+            id="procurement_contract_expiry_monitor",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.start()
+        procurement_scheduler = scheduler
+        kb_logger.info("Started procurement contract expiry monitor scheduler (daily).")
+    except Exception:
+        kb_logger.exception("Failed to start procurement contract expiry monitor scheduler")
+
+
+def _stop_procurement_scheduler() -> None:
+    global procurement_scheduler
+    if procurement_scheduler is not None:
+        procurement_scheduler.shutdown(wait=False)
+        procurement_scheduler = None
+        kb_logger.info("Stopped procurement contract expiry monitor scheduler.")
+
 
 async def worker() -> None:
     global active_jobs
@@ -116,10 +162,10 @@ async def lifespan(app: FastAPI):
     ensure_context_jobs_columns()
     try:
         db = SessionLocal()
-        seed_tool_registry(db)
+        run_startup_seeds(db)
         db.close()
     except Exception:
-        kb_logger.exception("Failed to seed tool registry")
+        kb_logger.exception("Failed to run startup database seeds")
 
     _setup_cleanup_logging()
     # Start background user cleanup loop (soft deletes of long-expired, inactive users)
@@ -133,6 +179,7 @@ async def lifespan(app: FastAPI):
     kb_logger.info("Started 2 ingestion workers.")
     start_run_workers()
     kb_logger.info("Started context jobs run workers.")
+    _start_procurement_scheduler()
     # #region agent log
     try:
         import json as _json, time as _time
@@ -161,10 +208,13 @@ async def lifespan(app: FastAPI):
             task.cancel()
         await asyncio.gather(*worker_tasks, return_exceptions=True)
         stop_run_workers()
+        _stop_procurement_scheduler()
         kb_logger.info("Shutdown: All ingestion workers cancelled.")
 
 
 app = FastAPI(title="Jet Prompt Optimizer APIs", lifespan=lifespan)
+
+register_context_jobs_exception_handlers(app)
 
 setup_cors(app)
 add_pagination(app)

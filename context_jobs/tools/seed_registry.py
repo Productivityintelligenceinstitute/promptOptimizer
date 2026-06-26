@@ -36,6 +36,8 @@ def _category_for(tool_id: str) -> str:
     mapping = {
         "web-search": "search",
         "doc-reader": "read",
+        "contract-analyzer": "analysis",
+        "spend-analyzer": "analysis",
         "calculator": "compute",
         "code-exec": "execute",
         "api-caller": "integrate",

@@ -62,6 +62,28 @@ class UsageRepository:
             )
 
     @staticmethod
+    def get_trial_total_usage(
+        db,
+        user_id,
+        permission_id,
+        trial_start_date,
+        trial_end_date,
+    ) -> int:
+        if not trial_start_date or not trial_end_date:
+            return 0
+        total_used = (
+            db.query(func.coalesce(func.sum(UsageLogModel.count), 0))
+            .filter(
+                UsageLogModel.user_id == user_id,
+                UsageLogModel.permission_id == permission_id,
+                UsageLogModel.date >= trial_start_date,
+                UsageLogModel.date <= trial_end_date,
+            )
+            .scalar()
+        )
+        return int(total_used or 0)
+
+    @staticmethod
     def increment_daily_usage(db, user_id, permission_id):
         today = date.today()
 

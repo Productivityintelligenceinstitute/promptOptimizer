@@ -80,15 +80,6 @@ def should_attempt_repair(run: JobRunModel, validation_status: str) -> bool:
     return validation_status == "needs_repair" and cycles < MAX_REPAIR_CYCLES
 
 
-def build_repair_user_message(original: str, repair_reason: Optional[str]) -> str:
-    hint = repair_reason or "Fix validation issues from the previous attempt."
-    return (
-        f"{original}\n\n"
-        f"[REPAIR INSTRUCTION] The previous output failed validation: {hint}. "
-        f"Produce a corrected response that addresses these issues."
-    )
-
-
 def export_run_markdown(run: JobRunModel, job: Optional[ContextJobModel] = None) -> str:
     rop = run.run_output_package or {}
     primary = rop.get("primaryResult") or {}

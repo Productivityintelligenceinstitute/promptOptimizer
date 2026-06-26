@@ -16,6 +16,7 @@ from context_jobs.providers.base import (
     ToolCall,
     ToolDefinition,
     ToolExecutor,
+    is_fatal_tool_denial,
 )
 
 
@@ -109,6 +110,7 @@ class GeminiAdapter(ProviderAdapter):
 
             contents.append(candidate.content)
             response_parts: list[types.Part] = []
+            fatal_denial = False
             for fc in function_calls:
                 args = dict(fc.args) if fc.args else {}
                 result = await tool_executor(
@@ -125,7 +127,18 @@ class GeminiAdapter(ProviderAdapter):
                         response={"result": result.content, "is_error": result.is_error},
                     )
                 )
+                if is_fatal_tool_denial(result):
+                    fatal_denial = True
             contents.append(types.Content(role="user", parts=response_parts))
+            if fatal_denial:
+                return ProviderResponse(
+                    content="Agent stopped: run budget exceeded.",
+                    input_tokens=total_input,
+                    output_tokens=total_output,
+                    model=envelope.model,
+                    stop_reason="budget_exceeded",
+                    agent_turns=turns,
+                )
 
         return ProviderResponse(
             content="Agent stopped: maximum turns reached.",

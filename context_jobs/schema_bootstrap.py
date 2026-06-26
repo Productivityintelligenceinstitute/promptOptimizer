@@ -41,6 +41,11 @@ def ensure_context_jobs_columns() -> None:
             "ALTER TABLE context_jobs ADD COLUMN workspace_id VARCHAR NULL",
         )
         _add_column_if_missing(
+            "context_jobs",
+            "chain_config",
+            "ALTER TABLE context_jobs ADD COLUMN chain_config JSONB NULL",
+        )
+        _add_column_if_missing(
             "context_job_versions",
             "is_current",
             "ALTER TABLE context_job_versions ADD COLUMN is_current BOOLEAN NOT NULL DEFAULT FALSE",
@@ -96,5 +101,33 @@ def ensure_context_jobs_columns() -> None:
                     )
                 )
             logger.info("Created workspaces and workspace_members tables")
+        inspector = inspect(engine)
+        if "run_chains" not in inspector.get_table_names():
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS run_chains (
+                            id UUID PRIMARY KEY,
+                            parent_run_id UUID NOT NULL,
+                            child_job_id UUID NOT NULL,
+                            child_run_id UUID NULL,
+                            status VARCHAR NOT NULL DEFAULT 'pending',
+                            input_mapping JSONB NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_run_chains_parent_run_id ON run_chains (parent_run_id)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_run_chains_child_job_id ON run_chains (child_job_id)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_run_chains_child_run_id ON run_chains (child_run_id)")
+                )
+            logger.info("Created run_chains table")
     except Exception:
         logger.exception("Failed to ensure context_jobs schema columns")
