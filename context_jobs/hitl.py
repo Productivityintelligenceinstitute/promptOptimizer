@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 import context_jobs.audit as cj_audit
+from context_jobs.errors import ContextJobsNotFoundError
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 
 APPROVAL_TIMEOUT_SECONDS = 1800  # 30 minutes
@@ -453,7 +454,7 @@ def _update_approval_status(
             found = True
         updated_pending.append(entry)
     if not found:
-        raise ValueError(f"Approval {approval_id} not found for this run")
+        raise ContextJobsNotFoundError("Approval not found")
 
     run.pending_approvals = updated_pending
     flag_modified(run, "pending_approvals")

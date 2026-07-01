@@ -21,7 +21,7 @@ _VENDOR_CAPITALIZED_MSA_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9&.\-]+)\s+(?:MSA|SOW|NDA|Agreement)\b",
 )
 _VENDOR_PARTIES_RE = re.compile(
-    r"\b(?:and|with)\s+(.+?)\s*\((?:Vendor|Supplier)\)",
+    r'\b(?:and|with)\s+(.+?)\s*\(?["\']?(?:Vendor|Supplier)["\']?\)?',
     re.IGNORECASE,
 )
 _PROSE_DATE_RE = re.compile(
@@ -49,6 +49,11 @@ _CONTRACT_HEADING_RE = re.compile(
 _VENDOR_ID_LABEL_RE = re.compile(
     r'\bvendor[_\s-]?id\s*[:=]\s*["\']?([A-Za-z0-9][A-Za-z0-9_-]*)',
     re.IGNORECASE,
+)
+_VENDOR_LABEL_RE = re.compile(
+    r"(?i)\bvendor\s*:\s*"
+    r"([A-Za-z0-9&.,'\- ]+?)"
+    r"(?:\s*\.(?=\s*(?:contract|expiry|estimated)\b)|\s*\.?\s*$|\n)",
 )
 _CONTRACT_RENEWAL_MARKERS = (
     "master service agreement",
@@ -191,23 +196,67 @@ def _extract_expiry_date(text: str) -> str | None:
     return prose_dates[-1] if prose_dates else None
 
 
+_LEADING_VENDOR_STOPWORDS_RE = re.compile(
+    r"^(?:(?:review|analyze|assess|compare|the|for|our|your|active|supplier)\s+)+",
+    re.IGNORECASE,
+)
+
+
+def _clean_vendor_name(raw: str) -> str | None:
+    vendor = re.sub(r"\s+", " ", (raw or "")).strip(" .,-")
+    vendor = _LEADING_VENDOR_STOPWORDS_RE.sub("", vendor).strip(" .,-")
+    if len(vendor) < 3 or vendor.lower() in _SKIP_VENDOR_TOKENS:
+        return None
+    if vendor.lower() in {"master service", "master services", "service", "agreement"}:
+        return None
+    return vendor
+
+
+def _extract_labeled_vendor(text: str) -> str | None:
+    match = _VENDOR_LABEL_RE.search(text or "")
+    if not match:
+        return None
+    return _clean_vendor_name(match.group(1))
+
+
+def _extract_vendor_from_msa_context(text: str) -> str | None:
+    """Multi-word vendor name immediately before MSA/SOW/NDA/Agreement."""
+    sample = (text or "")[:3000]
+    for match in _VENDOR_BEFORE_MSA_RE.finditer(sample):
+        vendor = _clean_vendor_name(match.group(1))
+        if vendor:
+            return vendor
+    return None
+
+
+def _append_vendor_hint(hints: dict[str, Any], vendor: str) -> None:
+    cleaned = _clean_vendor_name(vendor)
+    if not cleaned:
+        return
+    vendors = list(hints.get("vendors") or [])
+    if cleaned not in vendors:
+        vendors.append(cleaned)
+        hints["vendors"] = vendors
+    normalized = normalize_vendor_id(cleaned)
+    if not normalized:
+        return
+    vendor_ids = list(hints.get("vendorIds") or [])
+    if normalized not in vendor_ids:
+        vendor_ids.append(normalized)
+        hints["vendorIds"] = vendor_ids
+
+
 def _extract_vendor(text: str) -> str | None:
     sample = text or ""
     party_match = _VENDOR_PARTIES_RE.search(sample[:3000])
     if party_match:
-        vendor = re.sub(r"\s+", " ", party_match.group(1)).strip(" .,-")
-        if len(vendor) >= 3:
+        vendor = _clean_vendor_name(party_match.group(1))
+        if vendor:
             return vendor
-    for pattern in (_VENDOR_CAPITALIZED_MSA_RE, _VENDOR_BEFORE_MSA_RE):
-        match = pattern.search(sample[:3000])
-        if not match:
-            continue
-        vendor = match.group(1).strip()
-        if vendor.lower() in {"master service", "service", "agreement"}:
-            continue
-        if len(vendor) >= 3 and vendor.lower() not in _SKIP_VENDOR_TOKENS:
-            return vendor
-    return None
+    labeled = _extract_labeled_vendor(sample)
+    if labeled:
+        return labeled
+    return _extract_vendor_from_msa_context(sample)
 
 
 def _extract_contract_name(text: str, vendor: str | None = None) -> str | None:
@@ -394,34 +443,31 @@ def extract_retrieval_hints(text: str) -> dict[str, Any]:
     if contract_ids:
         hints["contractIds"] = contract_ids
 
-    vendors: list[str] = []
-    for match in _VENDOR_CAPITALIZED_MSA_RE.finditer(sample):
-        name = match.group(1).strip()
-        if len(name) >= 3:
-            vendors.append(name)
-    if not vendors:
-        for match in _VENDOR_BEFORE_MSA_RE.finditer(sample):
-            name = match.group(1).strip()
-            if len(name) >= 3 and name.lower() not in _SKIP_VENDOR_TOKENS:
-                vendors.append(name)
-    if vendors:
-        hints["vendors"] = list(dict.fromkeys(vendors))
-
     vendor_ids: list[str] = []
     for match in _VENDOR_ID_LABEL_RE.finditer(sample):
         normalized = normalize_vendor_id(match.group(1))
         if normalized:
             vendor_ids.append(normalized)
-    for vendor in vendors:
-        normalized = normalize_vendor_id(vendor)
-        if normalized and normalized not in vendor_ids:
-            vendor_ids.append(normalized)
     if vendor_ids:
         hints["vendorIds"] = list(dict.fromkeys(vendor_ids))
 
+    labeled_vendor = _extract_labeled_vendor(sample)
+    if labeled_vendor:
+        _append_vendor_hint(hints, labeled_vendor)
+    elif not hints.get("vendors"):
+        msa_vendor = _extract_vendor_from_msa_context(sample)
+        if msa_vendor:
+            _append_vendor_hint(hints, msa_vendor)
+        else:
+            party_match = _VENDOR_PARTIES_RE.search(sample[:8000])
+            if party_match:
+                _append_vendor_hint(hints, party_match.group(1))
+
     contract_names: list[str] = []
-    for match in _VENDOR_CAPITALIZED_MSA_RE.finditer(sample):
-        contract_names.append(match.group(0).strip())
+    for match in _VENDOR_BEFORE_MSA_RE.finditer(sample):
+        name = match.group(0).strip()
+        if name and name.lower() not in {"master services agreement", "service agreement"}:
+            contract_names.append(name)
     for match in _CONTRACT_HEADING_RE.finditer(sample):
         title = re.sub(r"\s+", " ", match.group(1)).strip(" -:")
         if len(title) >= 8:

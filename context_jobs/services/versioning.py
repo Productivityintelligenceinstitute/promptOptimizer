@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 import context_jobs.audit as cj_audit
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.services._constants import JOB_VERSION_SNAPSHOT_FIELDS
 from context_jobs.services.job_queries import get_job
 from schemas.context_jobs_model import (
@@ -178,7 +179,7 @@ def record_publish_history(
 def list_publish_history(db: Session, owner: str, job_id: UUID) -> list[dict[str, Any]]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     rows = (
         db.query(PublishHistoryModel)
         .filter(PublishHistoryModel.job_id == job_id)
@@ -202,7 +203,7 @@ def list_publish_history(db: Session, owner: str, job_id: UUID) -> list[dict[str
 def list_job_versions(db: Session, owner: str, job_id: UUID) -> List[dict[str, Any]]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     ensure_job_version_seed(db, job, created_by=owner)
     normalize_current_version(db, job)
     return [serialize_job_version(job, row) for row in get_version_rows(db, job.id)]
@@ -211,7 +212,7 @@ def list_job_versions(db: Session, owner: str, job_id: UUID) -> List[dict[str, A
 def get_job_version(db: Session, owner: str, job_id: UUID, version: int) -> dict[str, Any]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     ensure_job_version_seed(db, job, created_by=owner)
     normalize_current_version(db, job)
     row = (
@@ -223,14 +224,14 @@ def get_job_version(db: Session, owner: str, job_id: UUID, version: int) -> dict
         .first()
     )
     if not row:
-        raise ValueError("Version not found")
+        raise ContextJobsNotFoundError("Version not found")
     return serialize_job_version(job, row)
 
 
 def get_latest_job_version(db: Session, owner: str, job_id: UUID) -> dict[str, Any]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     ensure_job_version_seed(db, job, created_by=owner)
     normalize_current_version(db, job)
     row = (
@@ -247,7 +248,7 @@ def get_latest_job_version(db: Session, owner: str, job_id: UUID) -> dict[str, A
             .first()
         )
     if not row:
-        raise ValueError("Version not found")
+        raise ContextJobsNotFoundError("Version not found")
     return serialize_job_version(job, row)
 
 
@@ -259,7 +260,7 @@ def publish_job(
 ) -> ContextJobModel:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     from_status = (job.status or "draft").lower()
     if from_status == "published":
         raise ValueError("Job is already published")
@@ -301,7 +302,7 @@ def archive_job(
 ) -> ContextJobModel:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     from_status = (job.status or "draft").lower()
     if from_status == "archived":
         raise ValueError("Job is already archived")
@@ -342,7 +343,7 @@ def rollback_job_version(
 ) -> ContextJobModel:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     ensure_job_version_seed(db, job, created_by=owner)
     row = (
         db.query(ContextJobVersionModel)
@@ -353,7 +354,7 @@ def rollback_job_version(
         .first()
     )
     if not row:
-        raise ValueError("Version not found")
+        raise ContextJobsNotFoundError("Version not found")
     previous_version = int(job.version or 1)
     snapshot = dict(row.snapshot or {})
     apply_job_snapshot(job, snapshot)

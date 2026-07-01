@@ -74,8 +74,8 @@ async def revoke_llm_key(
 ):
     try:
         key_services.revoke_llm_key(db, owner, key_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
     return None
 
 
@@ -87,8 +87,8 @@ async def verify_llm_key(
 ):
     try:
         return key_services.verify_llm_key(db, owner, key_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @provider_keys_router.get("/tool-keys", response_model=list[ToolKeyOut], tags=["Context Jobs"])
@@ -124,8 +124,8 @@ async def revoke_tool_key(
 ):
     try:
         key_services.revoke_tool_key(db, owner, key_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
     return None
 
 

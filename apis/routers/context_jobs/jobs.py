@@ -60,10 +60,6 @@ async def instantiate_template(
     """
     try:
         return cj_services.build_job_config_from_template(db, owner, template_id)
-    except ValueError as exc:
-        if str(exc) == "Template not found":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise_context_jobs_http(exc)
 
@@ -88,8 +84,8 @@ async def list_job_versions(
 ):
     try:
         return cj_services.list_job_versions(db, owner, job_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/jobs/{job_id}/versions/latest", response_model=cj_schemas.ContextJobVersionOut)
@@ -100,8 +96,8 @@ async def get_latest_job_version(
 ):
     try:
         return cj_services.get_latest_job_version(db, owner, job_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/jobs/{job_id}/versions/{version}", response_model=cj_schemas.ContextJobVersionOut)
@@ -113,8 +109,8 @@ async def get_job_version(
 ):
     try:
         return cj_services.get_job_version(db, owner, job_id, version)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post(
@@ -177,8 +173,8 @@ async def publish_job(
 ):
     try:
         return cj_services.publish_job(db, owner, job_id, payload.notes if payload else None)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/archive", response_model=cj_schemas.ContextJobOut)
@@ -190,8 +186,8 @@ async def archive_job(
 ):
     try:
         return cj_services.archive_job(db, owner, job_id, payload.notes if payload else None)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/rollback", response_model=cj_schemas.ContextJobOut)
@@ -203,8 +199,8 @@ async def rollback_job_version(
 ):
     try:
         return cj_services.rollback_job_version(db, owner, job_id, payload.version, payload.notes)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/jobs/{job_id}/publish-history", response_model=list[cj_schemas.PublishHistoryOut])
@@ -215,8 +211,8 @@ async def get_job_publish_history(
 ):
     try:
         return cj_services.list_publish_history(db, owner, job_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/identity-matches")
@@ -228,8 +224,8 @@ async def suggest_identity_matches(
 ):
     try:
         return cj_services.suggest_job_identity_matches(db, owner, job_id, payload.query)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/import-asset")
@@ -241,8 +237,8 @@ async def import_asset_into_job(
 ):
     try:
         return cj_services.import_asset_to_job(db, owner, job_id, payload.asset_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/audit-events", response_model=list[cj_schemas.AuditEventOut])
@@ -302,8 +298,8 @@ async def get_job_stats(
 ):
     try:
         return cj_services.get_job_stats(db, owner, job_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post(

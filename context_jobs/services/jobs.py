@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from context_jobs import schemas as cj_schemas
 import context_jobs.audit as cj_audit
 from context_jobs.agents.execution_modes import normalize_execution_mode
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.governance import normalize_escalation_policy, suggest_identity_matches
 from context_jobs.services._constants import normalize_workflow_type
 from context_jobs.services._validation import (
@@ -159,7 +160,7 @@ def suggest_job_identity_matches(
 ) -> list[dict[str, Any]]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     return suggest_identity_matches(job, query)
 
 
@@ -251,6 +252,87 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
     return duplicated
 
 
+def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> ContextJobModel:
+    """Duplicate a system template into the caller's workspace as a published job."""
+    template = get_template_job(db, template_id)
+    if not template:
+        raise ContextJobsNotFoundError("Template not found")
+
+    package_name = ensure_context_jobs_access(db, owner)
+    assert_can_create_job(db, owner, package_name)
+    ws = ensure_default_workspace(db, owner)
+    provider, model, key_id = validate_job_execution_for_plan(
+        db,
+        owner,
+        package_name,
+        template.execution_provider,
+        template.execution_model,
+        template.llm_key_id,
+    )
+    job = ContextJobModel(
+        name=template.name,
+        description=template.description,
+        status="published",
+        goal=template.goal,
+        semantic_blueprint=template.semantic_blueprint,
+        output_template=template.output_template,
+        workflow_type=template.workflow_type,
+        stable_instructions=template.stable_instructions,
+        role_configuration=template.role_configuration,
+        retrieval_config=template.retrieval_config,
+        retrieval_mode=template.retrieval_mode,
+        vector_connection_id=template.vector_connection_id,
+        memory_config=template.memory_config,
+        tool_permissions=template.tool_permissions,
+        validation_rules=template.validation_rules,
+        escalation_policy=template.escalation_policy,
+        budget_settings=template.budget_settings,
+        glossary_terms=template.glossary_terms,
+        relationships=template.relationships,
+        trusted_sources=template.trusted_sources,
+        chain_config=template.chain_config,
+        execution_provider=provider,
+        execution_model=model,
+        llm_key_id=key_id,
+        max_agent_turns=template.max_agent_turns,
+        execution_mode=template.execution_mode,
+        version=1,
+        owner=owner,
+        approval_required=template.approval_required,
+        policy_profile=template.policy_profile,
+        workspace_id=ws.id,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    record_job_version(db, job, created_by=owner, change_type="instantiate")
+    record_publish_history(
+        db,
+        job_id=job.id,
+        from_status="draft",
+        to_status="published",
+        changed_by=owner,
+        notes="Instantiated from system template",
+    )
+    cj_audit.write_audit_event(
+        db,
+        event_type="job.published",
+        entity_type="job",
+        entity_id=str(job.id),
+        actor=owner,
+        metadata={
+            "fromStatus": "draft",
+            "toStatus": "published",
+            "notes": "Instantiated from system template",
+            "templateId": str(template_id),
+            "jobVersion": job.version,
+        },
+    )
+    maybe_ensure_jet_managed_namespace(db, job)
+    record_job_created(db, owner)
+    return job
+
+
 def build_job_config_from_template(
     db: Session,
     owner: str,
@@ -259,7 +341,7 @@ def build_job_config_from_template(
     """Return a job configuration payload from a system template without persisting."""
     template = get_template_job(db, template_id)
     if not template:
-        raise ValueError("Template not found")
+        raise ContextJobsNotFoundError("Template not found")
 
     package_name = ensure_context_jobs_access(db, owner)
     ws = ensure_default_workspace(db, owner)
@@ -313,7 +395,7 @@ def build_job_config_from_template(
 
 def get_job_stats(db: Session, owner: str, job_id: UUID) -> dict:
     if not get_job(db, job_id, owner):
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     runs = db.query(JobRunModel).filter(JobRunModel.job_id == job_id).all()
     total_runs = len(runs)
     completed_runs = len([r for r in runs if r.state == "completed"])

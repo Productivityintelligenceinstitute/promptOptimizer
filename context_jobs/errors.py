@@ -8,8 +8,12 @@ from fastapi.responses import JSONResponse
 from context_jobs.plan_entitlements import ContextJobsAccessError, ContextJobsQuotaError
 
 
+class ContextJobsNotFoundError(ValueError):
+    """Resource missing or not visible to the authenticated owner (maps to HTTP 404)."""
+
+
 def register_context_jobs_exception_handlers(app: FastAPI) -> None:
-    """Return 403/429 for plan errors instead of 500 on unhandled routes."""
+    """Return 403/404/429 for plan and ownership errors instead of 500 on unhandled routes."""
 
     @app.exception_handler(ContextJobsAccessError)
     async def context_jobs_access_handler(
@@ -18,6 +22,16 @@ def register_context_jobs_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ContextJobsNotFoundError)
+    async def context_jobs_not_found_handler(
+        _request: Request,
+        exc: ContextJobsNotFoundError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc)},
         )
 
@@ -41,6 +55,11 @@ def raise_context_jobs_http(exc: Exception) -> None:
     if isinstance(exc, ContextJobsAccessError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    if isinstance(exc, ContextJobsNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     if isinstance(exc, ValueError):

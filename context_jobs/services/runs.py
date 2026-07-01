@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from context_jobs import schemas as cj_schemas
 import context_jobs.audit as cj_audit
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.hitl import confirm_memory_changes, resolve_tool_approval
 from context_jobs.orchestrator import enqueue_run, get_run_queue_status
 from context_jobs.assembly.prompt_safety import normalize_untrusted_text
@@ -58,7 +59,7 @@ def create_run(
     assert_can_create_run(db, owner, package_name)
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     if (job.status or "draft").lower() != "published":
         raise ValueError("Job must be published before running. Publish the job first.")
     resolve_llm_api_key(
@@ -99,7 +100,7 @@ def record_human_decision(
     data: cj_schemas.RunDecisionRequest,
 ) -> JobRunModel:
     if not get_job(db, run.job_id, owner):
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     if run.human_decision:
         raise ValueError("A decision has already been recorded for this run")
     run.human_decision = {
@@ -148,7 +149,7 @@ def replay_run(db: Session, owner: str, run_id: UUID) -> JobRunModel:
     assert_can_create_run(db, owner, package_name)
     run = get_run(db, run_id, owner)
     if not run:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     if not run.replay_snapshot and run.state not in {"completed", "failed", "escalated", "repair"}:
         raise ValueError("Run is not replayable")
     new_run = create_replay_run(db, owner, run)
@@ -166,7 +167,7 @@ def resolve_run_tool_approval(
 ) -> JobRunModel:
     run = get_run(db, run_id, owner)
     if not run:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     return resolve_tool_approval(db, run, approval_id, decision, owner, notes)
 
 
@@ -178,10 +179,10 @@ def confirm_run_memory(
 ) -> JobRunModel:
     run = get_run(db, run_id, owner)
     if not run:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     job = get_job(db, run.job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     changes = confirm_memory_changes(db, run, job, approved, owner)
     rop = dict(run.run_output_package or {})
     rop["memoryStateChanges"] = {
@@ -200,14 +201,14 @@ def confirm_run_memory(
 def get_run_tool_executions(db: Session, owner: str, run_id: UUID) -> list[dict[str, Any]]:
     run = get_run(db, run_id, owner)
     if not run:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     return list_tool_executions(db, run_id)
 
 
 def export_run_report(db: Session, owner: str, run_id: UUID) -> str:
     run = get_run(db, run_id, owner)
     if not run:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     job = get_job(db, run.job_id, owner)
     return export_run_markdown(run, job)
 

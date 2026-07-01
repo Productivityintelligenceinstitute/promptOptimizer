@@ -145,6 +145,30 @@ ANALYSIS_PROCUREMENT_VALIDATION_RULES: list[dict[str, Any]] = [
     },
 ]
 
+SUPPLIER_ASSESSMENT_RISK_RULES: list[dict[str, Any]] = [
+    {
+        "id": "proc_risk_threshold",
+        "name": "Vendor risk tier threshold",
+        "type": "procurement",
+        "checker": "risk_threshold",
+        "params": {"maxRiskTier": "high"},
+        "severity": "warning",
+        "enabled": True,
+    },
+]
+
+ONBOARDING_RISK_RULES: list[dict[str, Any]] = [
+    {
+        "id": "proc_risk_threshold",
+        "name": "Onboarding risk tier threshold",
+        "type": "procurement",
+        "checker": "risk_threshold",
+        "params": {"maxRiskTier": "medium"},
+        "severity": "warning",
+        "enabled": True,
+    },
+]
+
 CONTRACT_OUTPUT_FULL = """# Executive Summary
 ## Contract Overview
 ## Key Dates and Renewal Timeline
@@ -513,6 +537,7 @@ def _job_definitions() -> list[dict[str, Any]]:
             "stable_instructions": capability_instructions,
             "output_template": CAPABILITY_OUTPUT_FULL,
             "tool_permissions": REVIEW_TOOL_PERMISSIONS,
+            "validation_rules": SUPPLIER_ASSESSMENT_RISK_RULES,
         },
         {
             "name": "Supplier Capability Matrix (Executive)",
@@ -570,6 +595,7 @@ def _job_definitions() -> list[dict[str, Any]]:
             "stable_instructions": onboarding_instructions,
             "output_template": ONBOARDING_OUTPUT_FULL,
             "tool_permissions": REVIEW_TOOL_PERMISSIONS,
+            "validation_rules": ONBOARDING_RISK_RULES,
         },
         {
             "name": "Supplier Onboarding Checklist (Executive)",
@@ -695,6 +721,10 @@ def _apply_imports(
         _merge_validation_rules(job, job_validation_rules)
     elif workflow == "analysis":
         _merge_validation_rules(job, ANALYSIS_PROCUREMENT_VALIDATION_RULES)
+    elif workflow == "supplier_assessment":
+        _merge_validation_rules(job, SUPPLIER_ASSESSMENT_RISK_RULES)
+    elif workflow == "procurement":
+        _merge_validation_rules(job, ONBOARDING_RISK_RULES)
     job.tool_permissions = workflow_tools
     return summaries
 
@@ -899,6 +929,18 @@ def _patch_procurement_validation_and_retrieval(db: Session) -> list[str]:
             if len(job.validation_rules or []) != before:
                 changed = True
 
+        elif workflow == "supplier_assessment":
+            before = len(job.validation_rules or [])
+            _merge_validation_rules(job, SUPPLIER_ASSESSMENT_RISK_RULES)
+            if len(job.validation_rules or []) != before:
+                changed = True
+
+        elif workflow == "procurement":
+            before = len(job.validation_rules or [])
+            _merge_validation_rules(job, ONBOARDING_RISK_RULES)
+            if len(job.validation_rules or []) != before:
+                changed = True
+
         if changed:
             db.add(job)
             updated.append(job.name)
@@ -1052,6 +1094,7 @@ def seed_procurement_templates(db: Session) -> None:
     patched_jobs = _patch_executive_output_templates(db)
     patched_rate_card = _patch_rate_card_templates(db)
     patched_procurement = _patch_procurement_validation_and_retrieval(db)
+    patched_chains = patch_procurement_chain_configs(db)
 
     if created_assets:
         logger.info("Created procurement assets: %s", ", ".join(created_assets))
@@ -1070,3 +1113,5 @@ def seed_procurement_templates(db: Session) -> None:
             "Patched procurement validation/retrieval: %s",
             ", ".join(patched_procurement),
         )
+    if patched_chains:
+        logger.info("Patched procurement chain configs: %s", ", ".join(patched_chains))

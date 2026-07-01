@@ -10,6 +10,7 @@ from context_jobs.asset_taxonomy import (
     validate_asset_content,
     validate_asset_type,
 )
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.services.job_queries import get_job
 from context_jobs.workspace import default_workspace_id
 from schemas.context_jobs_model import ContextAssetModel, ContextJobModel
@@ -93,7 +94,7 @@ def import_assets_into_job(
     for asset_id in asset_ids:
         asset = get_importable_asset(db, asset_id, owner)
         if not asset:
-            raise ValueError(f"Asset not found: {asset_id}")
+            raise ContextJobsNotFoundError("Asset not found")
         if getattr(asset, "approval_status", "approved") not in {None, "approved", "active"}:
             raise ValueError(f"Asset {asset_id} is not approved for import")
         summaries.append(import_asset_into_job(job, asset))
@@ -105,7 +106,7 @@ def import_asset_to_job(
 ) -> dict[str, Any]:
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
     summaries = import_assets_into_job(db, owner, job, [asset_id])
     db.add(job)
     db.commit()

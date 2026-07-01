@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 import context_jobs.audit as cj_audit
+from context_jobs.errors import ContextJobsNotFoundError
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 from schemas.tool_execution_model import ToolExecutionModel
 
@@ -45,7 +46,7 @@ def create_replay_run(db: Session, owner: str, source_run: JobRunModel) -> JobRu
         .first()
     )
     if not job:
-        raise ValueError("Run not found")
+        raise ContextJobsNotFoundError("Run not found")
     snapshot = source_run.replay_snapshot or {}
     user_request = snapshot.get("userRequest") or source_run.user_request or ""
     job_version = snapshot.get("jobVersion") or source_run.job_version or job.version

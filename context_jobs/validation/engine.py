@@ -533,7 +533,7 @@ async def run_validation(
         decision = "failed"
         confidence = "medium"
         repair_reason = error_fails[0].message if error_fails else "Required source evidence is weak or missing."
-    elif job.escalation_policy == "always_review":
+    elif job.escalation_policy == "always_review" and bool(getattr(job, "approval_required", False)):
         status = "needs_human_review"
         decision = "passed_with_warnings"
         confidence = "low"

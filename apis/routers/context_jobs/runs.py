@@ -85,8 +85,8 @@ async def download_run_artifact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     try:
         target = resolve_download_artifact(owner, run, artifact_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(path=target, filename=target.name, media_type=media_type)
 
@@ -148,8 +148,8 @@ async def get_run_tool_executions(
 ):
     try:
         return cj_services.get_run_tool_executions(db, owner, run_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/runs/{run_id}/pending-approvals")
@@ -181,8 +181,8 @@ async def decide_tool_approval(
         return cj_services.resolve_run_tool_approval(
             db, owner, run_id, approval_id, payload.decision, payload.notes
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.post("/runs/{run_id}/memory-confirm", response_model=cj_schemas.JobRunOut)
@@ -194,8 +194,8 @@ async def confirm_memory_writes(
 ):
     try:
         return cj_services.confirm_run_memory(db, owner, run_id, payload.approved)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @router.get("/runs/{run_id}/export")
@@ -207,5 +207,5 @@ async def export_run(
     try:
         markdown = cj_services.export_run_report(db, owner, run_id)
         return PlainTextResponse(content=markdown, media_type="text/markdown")
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)

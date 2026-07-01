@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from context_jobs import schemas as cj_schemas
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.managed_jet_kb import ensure_managed_namespace
 from context_jobs.plan_entitlements import normalize_execution_for_plan
 from context_jobs.vector_connection_services import get_active_connection_for_owner
@@ -70,7 +71,7 @@ def validate_llm_key(
         .first()
     )
     if not row:
-        raise ValueError("Assigned llmKeyId was not found or is inactive for this user.")
+        raise ContextJobsNotFoundError("LLM key not found")
 
 
 def validate_job_execution_for_plan(

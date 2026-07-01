@@ -12,6 +12,7 @@ from context_jobs import schemas as cj_schemas
 from context_jobs.ingestion.ingestion_service import ingest_to_target
 from context_jobs.ingestion.target_resolver import resolve_external_ingestion_target
 from context_jobs.ingestion.types import IngestionResult
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.plan_entitlements import ensure_context_jobs_access
 from context_jobs.services.job_queries import get_job
 from context_jobs.services.jobs import update_job
@@ -73,7 +74,7 @@ def ingest_job_to_external_db(
     ensure_context_jobs_access(db, owner)
     job = get_job(db, job_id, owner)
     if not job:
-        raise ValueError("Job not found")
+        raise ContextJobsNotFoundError("Job not found")
 
     update_job(
         db,

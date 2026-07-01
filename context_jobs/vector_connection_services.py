@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.retrieval.factory import get_retrieval_adapter
 from context_jobs.retrieval.security import decrypt_config, encrypt_config
 from context_jobs.vector_connection_schemas import VectorConnectionCreate, VectorConnectionUpdate
@@ -122,7 +123,7 @@ def get_active_connection_for_owner(
     """Load a connection that belongs to this account and is usable on a context job."""
     conn = get_connection(db, connection_id, owner)
     if not conn:
-        raise ValueError("Vector connection not found for this account.")
+        raise ContextJobsNotFoundError("Vector connection not found")
     if conn.status == "disabled":
         raise ValueError("Vector connection has been removed.")
     if conn.status != "active":

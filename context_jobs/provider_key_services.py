@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.provider_key_schemas import LlmKeyCreate, ToolKeyCreate
 from context_jobs.providers.registry import PROVIDER_REGISTRY
 from context_jobs.security.key_encryption import decrypt_api_key, encrypt_api_key, mask_key
@@ -157,7 +158,7 @@ def revoke_llm_key(db: Session, owner: str, key_id: UUID) -> None:
         .first()
     )
     if not row:
-        raise ValueError("Key not found")
+        raise ContextJobsNotFoundError("LLM key not found")
     row.status = "revoked"
     row.updated_at = _now()
     db.add(row)
@@ -171,7 +172,7 @@ def verify_llm_key(db: Session, owner: str, key_id: UUID) -> LlmProviderKeyModel
         .first()
     )
     if not row or row.status == "revoked":
-        raise ValueError("Key not found")
+        raise ContextJobsNotFoundError("LLM key not found")
     try:
         api_key = decrypt_api_key(row.encrypted_key)
         _verify_llm_key(row.provider, api_key)
@@ -241,7 +242,7 @@ def resolve_llm_api_key(
         .first()
     )
     if not row:
-        raise ValueError("Assigned LLM key not found or inactive")
+        raise ContextJobsNotFoundError("LLM key not found")
     row.usage_count = (row.usage_count or 0) + 1
     row.updated_at = _now()
     db.add(row)
@@ -285,7 +286,7 @@ def revoke_tool_key(db: Session, owner: str, key_id: UUID) -> None:
         .first()
     )
     if not row:
-        raise ValueError("Key not found")
+        raise ContextJobsNotFoundError("LLM key not found")
     row.status = "revoked"
     row.updated_at = _now()
     db.add(row)

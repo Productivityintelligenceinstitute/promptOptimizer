@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.errors import raise_context_jobs_http
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
@@ -57,13 +58,8 @@ async def ingest_into_external_db(
 
     except HTTPException:
         raise
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"External ingestion failed: {exc}"},
-        ) from exc
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/ingest/external", response_model=dict[str, Any])
@@ -97,13 +93,8 @@ async def ingest_job_into_external_db(
 
     except HTTPException:
         raise
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"External job ingestion failed: {exc}"},
-        ) from exc
+        raise_context_jobs_http(exc)
 
 
 @router.post("/jobs/{job_id}/ingest", response_model=dict[str, Any])

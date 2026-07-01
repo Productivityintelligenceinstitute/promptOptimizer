@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
+from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.tools.artifact_paths import artifact_root, run_artifact_dir
 from schemas.context_jobs_model import JobRunModel
 
@@ -39,7 +40,7 @@ def resolve_download_artifact(owner: str, run: JobRunModel, relative_path: str) 
     if base not in target.parents and target != base:
         raise ValueError("Artifact path escapes run workspace")
     if not target.exists() or not target.is_file():
-        raise ValueError("Artifact not found")
+        raise ContextJobsNotFoundError("Artifact not found")
     return target
 
 

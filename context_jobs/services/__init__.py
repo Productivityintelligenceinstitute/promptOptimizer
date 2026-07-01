@@ -12,6 +12,7 @@ from context_jobs.services.ingestion import ingest_job_to_external_db, ingest_to
 from context_jobs.services.job_queries import get_job, get_template_job, list_jobs, list_template_jobs
 from context_jobs.services.jobs import (
     build_job_config_from_template,
+    instantiate_template_job,
     create_job,
     duplicate_job,
     get_job_stats,
@@ -47,6 +48,7 @@ from context_jobs.services.versioning import (
 __all__ = [
     "archive_job",
     "confirm_run_memory",
+    "instantiate_template_job",
     "build_job_config_from_template",
     "create_asset",
     "create_job",

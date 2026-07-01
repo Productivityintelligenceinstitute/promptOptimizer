@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -11,6 +12,8 @@ from context_jobs.validation.tool_output import find_tool_output
 from schemas.context_jobs_model import ContextJobModel
 
 CheckerFn = Callable[["ProcurementCheckContext", dict[str, Any]], "ProcurementCheckResult"]
+
+logger = logging.getLogger(__name__)
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _RISK_TIER_RE = re.compile(
@@ -41,11 +44,28 @@ def _normalize_clause_id(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
 
 
+_SUBPROCESSOR_ALIASES: tuple[str, ...] = (
+    "subprocessor",
+    "subprocessors",
+    "subprocessor_controls",
+    "sub-processor",
+    "sub-processing",
+    "third party",
+    "third-party",
+    "flow down",
+    "flow-down",
+    "flow down obligations",
+    "subprocessor approval",
+    "subprocessor notice",
+    "right to object",
+)
+
 _MANDATORY_CLAUSE_ALIASES: dict[str, tuple[str, ...]] = {
     "liability_cap": (
         "liability_cap",
         "liability",
         "liability cap",
+        "liability and indemnification",
         "limitation of liability",
         "limitation on liability",
         "indemnification",
@@ -63,24 +83,33 @@ _MANDATORY_CLAUSE_ALIASES: dict[str, tuple[str, ...]] = {
         "data_protection",
         "data protection",
         "data privacy",
+        "data privacy and ai",
+        "privacy and ai",
         "privacy",
         "gdpr",
         "data processing",
         "cross border transfer",
+        "cross-border transfer",
+        "cross-border",
         "standard contractual clauses",
         "scc",
         "breach notification",
         "confidentiality",
+        "ai compliance",
     ),
-    "subprocessor_controls": (
-        "subprocessor_controls",
-        "subprocessor",
-        "subprocessors",
-        "flow down",
-        "flow-down",
-        "subprocessor approval",
-        "subprocessor notice",
-        "right to object",
+    "subprocessors": _SUBPROCESSOR_ALIASES,
+    "subprocessor_controls": _SUBPROCESSOR_ALIASES,
+    "pricing": (
+        "pricing",
+        "commercial",
+        "commercial and pricing",
+        "commercial and pricing terms",
+        "rate card",
+        "escalation",
+        "pricing escalation",
+        "indexation",
+        "fees",
+        "payment terms",
     ),
     "ai_use_restrictions": (
         "ai_use_restrictions",
@@ -95,6 +124,8 @@ _MANDATORY_CLAUSE_ALIASES: dict[str, tuple[str, ...]] = {
         "customer data training",
         "ai generated outputs",
         "ai-generated outputs",
+        "privacy and ai",
+        "data privacy and ai",
     ),
 }
 
@@ -116,11 +147,7 @@ def _clause_matches_required_id(clause: dict[str, Any], required_id: str) -> boo
     if required_id in variants:
         return True
 
-    aliases = {
-        _normalize_clause_id(alias)
-        for alias in _MANDATORY_CLAUSE_ALIASES.get(required_id, (required_id,))
-        if alias
-    }
+    aliases = _aliases_for_clause_id(required_id)
     if variants & aliases:
         return True
 
@@ -133,11 +160,34 @@ def _clause_matches_required_id(clause: dict[str, Any], required_id: str) -> boo
     )
 
 
+def _aliases_for_clause_id(required_id: str) -> set[str]:
+    aliases = {
+        _normalize_clause_id(alias)
+        for alias in _MANDATORY_CLAUSE_ALIASES.get(required_id, (required_id,))
+        if alias
+    }
+    aliases.add(_normalize_clause_id(required_id))
+    return aliases
+
+
+def _output_text_matches_clause(output_text: str, required_id: str) -> bool:
+    """Fallback: required clause discussed in final report headings or body."""
+    text = (output_text or "").lower()
+    if not text:
+        return False
+    for alias in _MANDATORY_CLAUSE_ALIASES.get(required_id, (required_id,)):
+        phrase = (alias or "").replace("_", " ").strip().lower()
+        if phrase and phrase in text:
+            return True
+    return False
+
+
 def _top_level_clause_present(analysis: dict[str, Any], required_id: str) -> bool:
     """Fallback for contract-analyzer summary fields when clause rows use unexpected names."""
     field_map = {
         "liability_cap": ("liabilityCap",),
         "termination": ("termination",),
+        "pricing": ("pricingEscalation",),
         "ai_use_restrictions": ("aiDataUseLanguage",),
     }
     for field in field_map.get(required_id, ()):
@@ -210,6 +260,11 @@ def check_mandatory_clause(
         )
 
     clauses = [c for c in (analysis.get("clauses") or []) if isinstance(c, dict)]
+    logger.debug(
+        "mandatory_clause contract-analyzer clauses=%s top_level_keys=%s",
+        clauses,
+        [k for k in ("liabilityCap", "termination", "pricingEscalation", "aiDataUseLanguage") if analysis.get(k)],
+    )
     found_by_id: dict[str, dict[str, Any]] = {}
     for clause_id in required_ids:
         matched = None
@@ -218,14 +273,21 @@ def check_mandatory_clause(
                 matched = clause
                 break
         fallback_present = matched is None and _top_level_clause_present(analysis, clause_id)
+        output_present = (
+            matched is None
+            and not fallback_present
+            and _output_text_matches_clause(ctx.output_text, clause_id)
+        )
         found_by_id[clause_id] = {
-            "present": bool((matched and matched.get("present")) or fallback_present),
+            "present": bool(matched or fallback_present or output_present),
             "matchedClause": (
                 matched.get("name")
                 or matched.get("title")
                 if matched
                 else "contract-analyzer summary field"
                 if fallback_present
+                else "report output text"
+                if output_present
                 else None
             ),
         }

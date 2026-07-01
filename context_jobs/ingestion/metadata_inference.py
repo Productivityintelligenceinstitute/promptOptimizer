@@ -46,12 +46,35 @@ def _empty(value: Any) -> bool:
     return False
 
 
+_EXPLICIT_VENDOR_ID_RE = re.compile(
+    r"^[A-Z]{2,}[-_][A-Z0-9][A-Z0-9_-]*$",
+    re.IGNORECASE,
+)
+_LEGAL_ENTITY_SUFFIX_RE = re.compile(
+    r"(?:\s+(?:inc|incorporated|ltd|limited|llc|corp|corporation|co|ag|gmbh|plc)\.?)+$",
+    re.IGNORECASE,
+)
+
+
+def _strip_legal_entity_suffixes(name: str) -> str:
+    text = name.strip()
+    while True:
+        stripped = _LEGAL_ENTITY_SUFFIX_RE.sub("", text).strip()
+        if stripped == text:
+            return text
+        text = stripped
+
+
 def normalize_vendor_id(value: str | None) -> str | None:
     """Canonical vendorId slug stored on vector metadata and used for retrieval filters."""
-    raw = (value or "").strip().lower()
+    raw = (value or "").strip()
     if not raw:
         return None
-    slug = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    if _EXPLICIT_VENDOR_ID_RE.match(raw):
+        slug = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+        return slug or None
+    name = _strip_legal_entity_suffixes(raw)
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     return slug or None
 
 
