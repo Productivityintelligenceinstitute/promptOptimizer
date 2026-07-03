@@ -21,6 +21,7 @@ from admin.routes.update_role import update_role_router
 from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
 from admin.routes.affiliate_report import affiliate_report_router
+from admin.routes.extend_trial import extend_trial_router
 
 from admin.core.ingestion_job import ingest_job
 
@@ -29,20 +30,25 @@ from fastapi_pagination import add_pagination
 
 from database.database import create_db_tables
 from background.tasks.user_cleanup import user_cleanup_loop
+from background.tasks.subscription_expiry import subscription_expiry_loop
 import schemas
 import firebse.firebase_setup
 
 
 def _setup_cleanup_logging():
-    """Ensure user cleanup task logs appear on the server console."""
-    log = logging.getLogger("background.tasks.user_cleanup")
-    log.setLevel(logging.INFO)
-    if not log.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(
-            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        )
-        log.addHandler(h)
+    """Ensure background task logs appear on the server console."""
+    for logger_name in (
+        "background.tasks.user_cleanup",
+        "background.tasks.subscription_expiry",
+    ):
+        log = logging.getLogger(logger_name)
+        log.setLevel(logging.INFO)
+        if not log.handlers:
+            h = logging.StreamHandler(sys.stderr)
+            h.setFormatter(
+                logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            )
+            log.addHandler(h)
 
 
 # --- KB Ingestion Queue Logic ---
@@ -102,6 +108,9 @@ async def lifespan(app: FastAPI):
     # Start background user cleanup loop (soft deletes of long-expired, inactive users)
     asyncio.create_task(user_cleanup_loop())
 
+    # Start daily subscription expiry loop (flips past-due subscriptions to "expired")
+    asyncio.create_task(subscription_expiry_loop())
+
     # Start KB ingestion workers and expose queue/status on app.state
     global worker_tasks
     worker_tasks = [asyncio.create_task(worker()) for _ in range(2)]
@@ -138,3 +147,4 @@ app.include_router(update_role_router, tags=["Admin - Update User Role"])
 app.include_router(assign_package_router, tags=["Admin - Assign Package"])
 app.include_router(users_admin_router, tags=["Admin - Users"])
 app.include_router(affiliate_report_router, tags=["Admin - Affiliate Report"])
+app.include_router(extend_trial_router, tags=["Admin - Trial Management"])
