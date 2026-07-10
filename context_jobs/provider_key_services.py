@@ -65,13 +65,60 @@ def _verify_tool_key(tool_id: str, provider: str, api_key: str) -> None:
     raise ValueError(f"Unsupported tool/provider combination: {tool_id}/{provider}")
 
 
-def list_llm_keys(db: Session, owner: str) -> list[LlmProviderKeyModel]:
+def list_llm_keys(
+    db: Session,
+    owner: str,
+    *,
+    provider: Optional[str] = None,
+) -> list[LlmProviderKeyModel]:
+    query = db.query(LlmProviderKeyModel).filter(
+        LlmProviderKeyModel.owner == owner,
+        LlmProviderKeyModel.status != "revoked",
+    )
+    if provider:
+        query = query.filter(
+            LlmProviderKeyModel.provider == provider.lower().strip()
+        )
+    return query.order_by(LlmProviderKeyModel.created_at.desc()).all()
+
+
+def get_llm_key(db: Session, owner: str, key_id: UUID) -> Optional[LlmProviderKeyModel]:
     return (
         db.query(LlmProviderKeyModel)
-        .filter(LlmProviderKeyModel.owner == owner, LlmProviderKeyModel.status != "revoked")
-        .order_by(LlmProviderKeyModel.created_at.desc())
-        .all()
+        .filter(
+            LlmProviderKeyModel.id == key_id,
+            LlmProviderKeyModel.owner == owner,
+            LlmProviderKeyModel.status != "revoked",
+        )
+        .first()
     )
+
+
+def list_models_for_llm_key(db: Session, owner: str, key_id: UUID) -> dict:
+    from context_jobs.provider_model_catalog import fetch_chat_models_for_key
+
+    row = get_llm_key(db, owner, key_id)
+    if not row:
+        raise ContextJobsNotFoundError("LLM key not found")
+    if row.status != "active":
+        raise ValueError(
+            f"LLM key '{row.key_label}' is not active (status: {row.status}). "
+            "Verify or replace the key before listing models."
+        )
+
+    api_key = decrypt_api_key(row.encrypted_key)
+    models = fetch_chat_models_for_key(
+        row.provider,
+        api_key,
+        cache_key=f"llm_key:{row.id}",
+    )
+    return {
+        "keyId": row.id,
+        "provider": row.provider,
+        "keyLabel": row.key_label,
+        "models": models,
+        "fetchedAt": _now(),
+    }
 
 
 def get_active_llm_key_for_provider(
@@ -148,6 +195,9 @@ def create_llm_key(db: Session, owner: str, data: LlmKeyCreate) -> LlmProviderKe
     db.add(row)
     db.commit()
     db.refresh(row)
+    from context_jobs.provider_model_catalog import invalidate_models_cache_for_key
+
+    invalidate_models_cache_for_key(str(row.id))
     return row
 
 
@@ -163,6 +213,9 @@ def revoke_llm_key(db: Session, owner: str, key_id: UUID) -> None:
     row.updated_at = _now()
     db.add(row)
     db.commit()
+    from context_jobs.provider_model_catalog import invalidate_models_cache_for_key
+
+    invalidate_models_cache_for_key(str(key_id))
 
 
 def verify_llm_key(db: Session, owner: str, key_id: UUID) -> LlmProviderKeyModel:
@@ -188,6 +241,9 @@ def verify_llm_key(db: Session, owner: str, key_id: UUID) -> LlmProviderKeyModel
     db.add(row)
     db.commit()
     db.refresh(row)
+    from context_jobs.provider_model_catalog import invalidate_models_cache_for_key
+
+    invalidate_models_cache_for_key(str(row.id))
     return row
 
 

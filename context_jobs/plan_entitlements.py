@@ -334,11 +334,6 @@ def normalize_execution_for_plan(
                 "Add a key via POST /context-jobs/llm-keys or set llmKeyId on this job."
             )
         model = execution_model or get_default_model(provider)
-        allowed_models = PROVIDER_REGISTRY[provider]["models"]
-        if model not in allowed_models:
-            raise ValueError(
-                f"Model '{model}' is not available for provider '{provider}'."
-            )
         return provider, model, llm_key_id
 
     raise ContextJobsAccessError("Context Jobs require a Pro plan or active trial.")

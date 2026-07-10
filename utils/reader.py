@@ -8,7 +8,13 @@ def read_pdf(path: Path) -> str:
 
 def read_docx(path: Path) -> str:
     doc = Document(str(path))
-    return "\n".join(p.text for p in doc.paragraphs)
+    parts = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text and cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n".join(parts)
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")

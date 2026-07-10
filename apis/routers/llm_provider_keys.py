@@ -18,6 +18,7 @@ from context_jobs.plan_entitlements import (
 from context_jobs.provider_key_schemas import (
     ContextJobsEntitlementsOut,
     LlmKeyCreate,
+    LlmKeyModelsOut,
     LlmKeyOut,
     ProviderInfo,
     ToolInfo,
@@ -43,10 +44,40 @@ def _require_pro_byok_keys(
 
 @provider_keys_router.get("/llm-keys", response_model=list[LlmKeyOut], tags=["Context Jobs"])
 async def list_llm_keys(
+    provider: str | None = None,
     owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
-    return key_services.list_llm_keys(db, owner)
+    """
+    List BYOK keys for the authenticated user, newest first.
+
+    Optional `provider` query filters to one provider (openai, google, anthropic).
+    Use after the user picks a provider in the job editor; default selection = first row (latest).
+    """
+    return key_services.list_llm_keys(db, owner, provider=provider)
+
+
+@provider_keys_router.get(
+    "/llm-keys/{key_id}/models",
+    response_model=LlmKeyModelsOut,
+    tags=["Context Jobs"],
+)
+async def list_llm_key_models(
+    key_id: UUID,
+    owner: str = Depends(_require_pro_byok_keys),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Chat models accessible to a specific BYOK key (live provider API, cached ~5 min).
+
+    Call after the user selects a key in the job editor to populate the model dropdown.
+    """
+    try:
+        return key_services.list_models_for_llm_key(db, owner, key_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
 
 
 @provider_keys_router.post(

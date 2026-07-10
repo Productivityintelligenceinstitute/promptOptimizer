@@ -352,6 +352,7 @@ def build_job_config_from_template(
         template.execution_provider,
         template.execution_model,
         template.llm_key_id,
+        allow_model_fallback=True,
     )
     payload = _normalize_job_payload(
         {

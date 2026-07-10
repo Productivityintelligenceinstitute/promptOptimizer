@@ -189,6 +189,7 @@ Rules:
         payload.execution_provider,
         payload.execution_model,
         payload.llm_key_id,
+        allow_model_fallback=True,
     )
     payload = payload.model_copy(
         update={

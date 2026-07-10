@@ -69,6 +69,17 @@ class ModelInfo(BaseModel):
         populate_by_name = True
 
 
+class LlmKeyModelsOut(BaseModel):
+    key_id: UUID = Field(..., alias="keyId")
+    provider: str
+    key_label: str = Field(..., alias="keyLabel")
+    models: list[ModelInfo]
+    fetched_at: datetime = Field(..., alias="fetchedAt")
+
+    class Config:
+        populate_by_name = True
+
+
 class ProviderInfo(BaseModel):
     provider: str
     display_name: str = Field(..., alias="displayName")
