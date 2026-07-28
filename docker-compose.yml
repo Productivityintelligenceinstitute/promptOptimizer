@@ -58,7 +58,6 @@ services:
       - ./uploaded_kb:/app/uploaded_kb
       - ./logs:/app/logs
       - ./data:/app/data
-      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
     depends_on:
       postgres:
         condition: service_healthy
