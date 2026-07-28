@@ -1,0 +1,28 @@
+VENDOR PROFILE
+Vendor ID: VND-NEXGEN-042
+Legal Name: NexGen Analytics Ltd.
+Trading Name: NexGen Analytics
+Headquarters: Austin, TX, USA
+Website: https://example.com/nexgen-analytics
+
+CAPABILITIES
+- Analytics platforms and BI embedding
+- Machine learning model operations
+- Data platform engineering (lakehouse, pipelines)
+- Category tags: analytics, ml, data-platform
+
+RISK AND SPEND
+Risk tier: medium
+Spend tier: 2
+Primary categories: Analytics Software, Data Engineering Services
+Annual estimated spend with Jet Industries: $1.2M
+
+CONTRACTS
+Linked contract IDs: ACME-MSA-2024-001 (subprocessor / analytics module via Acme ecosystem reference)
+Primary MSA status: Active through 2026-12-31 (via linked commercial vehicle)
+Renewal complexity: medium
+
+NOTES
+- Strong delivery on predictive analytics pilots in 2025
+- Me-too risk on commoditized dashboarding features — prefer differentiation claims with evidence
+- Requires subprocessor register for any third-party model hosts

@@ -6,6 +6,7 @@ Reuses platform chunking logic from utils.chunking with configurable parameters.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from context_jobs.ingestion.metadata import normalize_document_metadata
@@ -33,7 +34,12 @@ def chunk_documents(
 
     for doc_idx, doc in enumerate(documents):
         text = sanitize_db_text(doc.get("text", "")).strip()
-        doc_id = doc.get("id") or f"doc_{doc_idx}"
+        # Prefer caller id; never fall back to a reused doc_0 style id across
+        # separate paste ingestions (that overwrites prior vectors in Pinecone/Qdrant).
+        raw_id = doc.get("id")
+        doc_id = str(raw_id).strip() if raw_id is not None else ""
+        if not doc_id:
+            doc_id = f"doc_{doc_idx}_{uuid.uuid4().hex[:12]}"
         base_metadata = normalize_document_metadata(
             doc.get("metadata"),
             doc_id=doc_id,

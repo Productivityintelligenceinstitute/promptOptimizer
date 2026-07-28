@@ -1,0 +1,36 @@
+JET INDUSTRIES PROCUREMENT POLICY
+Version: 2.1
+Effective: March 1, 2025
+Owner: Corporate Procurement
+
+1. PURPOSE
+This policy defines mandatory controls for sourcing, contracting, renewals, and supplier onboarding across Jet Industries.
+
+2. MANDATORY CONTRACT CLAUSES
+All supplier agreements above $50,000 annual spend must include:
+- Scope of services and acceptance criteria
+- Payment terms, invoicing cadence, and audit rights
+- Confidentiality and data protection obligations
+- Information security and incident notification (max 72 hours)
+- Subprocessor approval and flow-down requirements
+- AI/data-use restrictions and training prohibitions where applicable
+- Liability caps, indemnities, and insurance minimums
+- Termination, transition assistance, and exit obligations
+- Renewal notice, auto-renewal opt-out, and price-change mechanics
+- Governing law and dispute resolution
+
+3. RENEWAL LEAD TIMES
+- Low complexity: alert at 3 months before expiry
+- Medium complexity: alert at 6 months before expiry
+- High complexity / strategic: alert at 9–12 months before expiry
+
+4. SUPPLIER RISK TIERS
+- Tier 1 (strategic): board-visible categories, multi-region dependency
+- Tier 2 (important): material spend or regulated data processing
+- Tier 3 (tactical): commodity / low-risk services
+
+5. RATE CARD GOVERNANCE
+Professional services engagements must use an approved rate card or competitive benchmark within ±10% of category medians unless an exception is documented.
+
+6. POLICY EXCEPTIONS
+Exceptions require Procurement Director approval and must be logged with residual risk and expiry date.

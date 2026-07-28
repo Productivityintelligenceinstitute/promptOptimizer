@@ -1,0 +1,28 @@
+VENDOR PROFILE
+Vendor ID: VND-CLOUDCO-017
+Legal Name: CloudCo Systems AG
+Trading Name: CloudCo
+Headquarters: Zurich, Switzerland
+Website: https://example.com/cloudco
+
+CAPABILITIES
+- Multi-cloud landing zones and FinOps
+- Cloud security posture management
+- Identity and access governance add-ons
+- Category tags: cloud, security, finops
+
+RISK AND SPEND
+Risk tier: low
+Spend tier: 1
+Primary categories: Cloud Security, FinOps Advisory
+Annual estimated spend with Jet Industries: $280K
+
+CONTRACTS
+Linked contract IDs: none (new supplier under evaluation)
+Primary MSA status: Draft / RFP stage
+Renewal complexity: low (if awarded as commodity security tooling)
+
+NOTES
+- Competitive on EU data residency packaging
+- SOC 2 Type II and ISO 27001 available on request
+- Preferred for tactical FinOps engagements under $500K ACV

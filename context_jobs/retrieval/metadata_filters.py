@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-_METADATA_FILTER_PROVIDERS = frozenset({"pinecone", "jet_kb", "jetkb", "internal"})
+# Providers that honor the shared Pinecone-shaped filter dialect in search().
+_METADATA_FILTER_PROVIDERS = frozenset(
+    {
+        "pinecone",
+        "jet_kb",
+        "jetkb",
+        "internal",
+        "qdrant",
+        "weaviate",
+        "pgvector",
+    }
+)
 
 
 def adapter_supports_metadata_filter(adapter: Any) -> bool:

@@ -20,6 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column("context_jobs", sa.Column("chain_config", postgresql.JSONB(), nullable=True))
+    op.add_column("context_jobs", sa.Column("linked_child_job_id", postgresql.UUID(as_uuid=True), nullable=True))
     op.create_table(
         "run_chains",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -46,4 +47,5 @@ def downgrade() -> None:
     op.drop_index("ix_run_chains_child_job_id", table_name="run_chains")
     op.drop_index("ix_run_chains_parent_run_id", table_name="run_chains")
     op.drop_table("run_chains")
+    op.drop_column("context_jobs", "linked_child_job_id")
     op.drop_column("context_jobs", "chain_config")

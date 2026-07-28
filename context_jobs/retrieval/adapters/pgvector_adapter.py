@@ -10,6 +10,7 @@ from context_jobs.embeddings import embed_query
 from context_jobs.ingestion.records import ensure_record_ids
 from context_jobs.ingestion.types import UpsertResult
 from context_jobs.retrieval.base import NormalizedMatch
+from context_jobs.retrieval.filter_dialect import to_pgvector_predicate
 from core.config import EMBED_MODEL
 
 
@@ -70,9 +71,37 @@ class PgVectorAdapter:
     def _vector_literal(vec: list[float]) -> str:
         return "[" + ",".join(f"{float(v):.10f}" for v in vec) + "]"
 
-    @staticmethod
-    def _fallback_id(content: str) -> str:
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:32]
+    def _resolve_vector_type_schema(self, cur) -> str:
+        cur.execute(
+            """
+            SELECT n.nspname
+            FROM pg_type t
+            JOIN pg_namespace n ON n.oid = t.typnamespace
+            WHERE t.typname = 'vector'
+            ORDER BY CASE WHEN n.nspname = 'public' THEN 0 ELSE 1 END
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(
+                "pgvector type 'vector' not found. "
+                "Run: CREATE EXTENSION vector WITH SCHEMA public;"
+            )
+        return str(row[0])
+
+    def _prepare_connection(self, cur) -> str:
+        """
+        Ensure the vector type is visible for ::vector casts.
+
+        Some installs place the extension in a non-public schema (e.g. content).
+        """
+        vector_schema = self._resolve_vector_type_schema(cur)
+        # Keep public available for other objects; put vector schema first.
+        cur.execute(
+            sql.SQL("SET search_path TO {}, public").format(sql.Identifier(vector_schema))
+        )
+        return vector_schema
 
     def _declared_embedding_dimensions(self, conn) -> int | None:
         """
@@ -113,75 +142,9 @@ class PgVectorAdapter:
                 return dim
         return None
 
-    def search(
-        self,
-        query_text: str,
-        top_k: int = 8,
-        filters: dict[str, Any] | None = None,
-    ) -> list[NormalizedMatch]:
-        _ = filters  # Dense-only v1: no filter support yet.
-        query_vec = embed_query(query_text, self.config)
-        actual_dim = len(query_vec)
-        vec_text = self._vector_literal(query_vec)
-
-        select_columns = [sql.Identifier(self.content_column)]
-        if self.id_column:
-            select_columns.append(sql.Identifier(self.id_column))
-        if self.metadata_column:
-            select_columns.append(sql.Identifier(self.metadata_column))
-
-        # Add score at the end to keep positional mapping simple.
-        select_list = sql.SQL(", ").join(
-            select_columns + [sql.SQL("1 - ({} <=> %s::vector) AS score").format(sql.Identifier(self.embedding_column))]
-        )
-
-        query = sql.SQL(
-            "SELECT {select_list} "
-            "FROM {table} "
-            "ORDER BY {embedding_col} <=> %s::vector "
-            "LIMIT %s"
-        ).format(
-            select_list=select_list,
-            table=self._qualified_table(),
-            embedding_col=sql.Identifier(self.embedding_column),
-        )
-
-        rows: list[Any]
-        with psycopg2.connect(self.connection_uri) as conn:
-            declared = self._declared_embedding_dimensions(conn)
-            if declared is not None and actual_dim != declared:
-                raise ValueError(
-                    "pgvector embedding dimension mismatch. "
-                    f"Column '{self.embedding_column}' is declared as vector({declared}), "
-                    f"but embedding_model '{self.embedding_model}' produced a query vector of length {actual_dim}. "
-                    "Use the same embedding model (or matching output size) as when rows were inserted."
-                )
-
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(query, (vec_text, vec_text, top_k))
-                    rows = cur.fetchall()
-            except Exception as exc:
-                raw = str(exc)
-                low = raw.lower()
-                if (
-                    "dimension" in low
-                    or "different vector dimensions" in low
-                    or ("expected" in low and "element" in low)
-                ):
-                    raise ValueError(
-                        "pgvector query failed due to vector dimension mismatch. "
-                        f"embedding_model '{self.embedding_model}' produced length {actual_dim}; "
-                        f"the table column '{self.embedding_column}' expects a different vector size. "
-                        "Declare the column as vector(N) where N matches the model output, or fix embedding_model. "
-                        f"Raw error: {raw}"
-                    ) from exc
-                raise
-
+    def _rows_to_matches(self, rows: list[Any]) -> list[NormalizedMatch]:
         results: list[NormalizedMatch] = []
         for row in rows:
-            # Row layout:
-            # [content] [+ id] [+ metadata] + [score]
             idx = 0
             content = row[idx] if row[idx] is not None else ""
             idx += 1
@@ -227,9 +190,130 @@ class PgVectorAdapter:
                     metadata=metadata,
                 )
             )
-
         return results
 
+    def search(
+        self,
+        query_text: str,
+        top_k: int = 8,
+        filters: dict[str, Any] | None = None,
+    ) -> list[NormalizedMatch]:
+        query_vec = embed_query(query_text, self.config)
+        actual_dim = len(query_vec)
+        vec_text = self._vector_literal(query_vec)
+
+        select_columns = [sql.Identifier(self.content_column)]
+        if self.id_column:
+            select_columns.append(sql.Identifier(self.id_column))
+        if self.metadata_column:
+            select_columns.append(sql.Identifier(self.metadata_column))
+
+        select_list = sql.SQL(", ").join(
+            select_columns + [sql.SQL("1 - ({} <=> %s::vector) AS score").format(sql.Identifier(self.embedding_column))]
+        )
+
+        where_sql = ""
+        filter_params: list[Any] = []
+        if filters:
+            if not self.metadata_column:
+                raise ValueError(
+                    "pgvector filtered search requires config.metadata_column "
+                    "(JSONB column holding chunk metadata)."
+                )
+            predicate = to_pgvector_predicate(filters, metadata_column=self.metadata_column)
+            if predicate:
+                where_sql, filter_params = predicate
+                where_sql = f"WHERE {where_sql} "
+
+        query = sql.SQL(
+            "SELECT {select_list} "
+            "FROM {table} "
+            "{where_clause}"
+            "ORDER BY {embedding_col} <=> %s::vector "
+            "LIMIT %s"
+        ).format(
+            select_list=select_list,
+            table=self._qualified_table(),
+            where_clause=sql.SQL(where_sql) if where_sql else sql.SQL(""),
+            embedding_col=sql.Identifier(self.embedding_column),
+        )
+
+        rows: list[Any]
+        with psycopg2.connect(self.connection_uri) as conn:
+            with conn.cursor() as cur:
+                self._prepare_connection(cur)
+            declared = self._declared_embedding_dimensions(conn)
+            if declared is not None and actual_dim != declared:
+                raise ValueError(
+                    "pgvector embedding dimension mismatch. "
+                    f"Column '{self.embedding_column}' is declared as vector({declared}), "
+                    f"but embedding_model '{self.embedding_model}' produced a query vector of length {actual_dim}. "
+                    "Use the same embedding model (or matching output size) as when rows were inserted."
+                )
+
+            try:
+                with conn.cursor() as cur:
+                    self._prepare_connection(cur)
+                    # Params: score vector, filter values..., order vector, limit
+                    params: list[Any] = [vec_text, *filter_params, vec_text, top_k]
+                    cur.execute(query, params)
+                    rows = cur.fetchall()
+            except Exception as exc:
+                raw = str(exc)
+                low = raw.lower()
+                if (
+                    "dimension" in low
+                    or "different vector dimensions" in low
+                    or ("expected" in low and "element" in low)
+                ):
+                    raise ValueError(
+                        "pgvector query failed due to vector dimension mismatch. "
+                        f"embedding_model '{self.embedding_model}' produced length {actual_dim}; "
+                        f"the table column '{self.embedding_column}' expects a different vector size. "
+                        "Declare the column as vector(N) where N matches the model output, or fix embedding_model. "
+                        f"Raw error: {raw}"
+                    ) from exc
+                raise
+
+        return self._rows_to_matches(rows)
+
+    def search_by_metadata_filter(
+        self,
+        filters: dict[str, Any],
+        top_k: int = 50,
+    ) -> list[NormalizedMatch]:
+        """Fetch chunks by metadata filter only (no semantic ranking)."""
+        if not self.metadata_column:
+            raise ValueError(
+                "pgvector metadata filter search requires config.metadata_column."
+            )
+        predicate = to_pgvector_predicate(filters, metadata_column=self.metadata_column)
+        if not predicate:
+            return []
+        where_sql, filter_params = predicate
+
+        select_columns = [sql.Identifier(self.content_column)]
+        if self.id_column:
+            select_columns.append(sql.Identifier(self.id_column))
+        select_columns.append(sql.Identifier(self.metadata_column))
+        select_list = sql.SQL(", ").join(
+            select_columns + [sql.SQL("1.0::float8 AS score")]
+        )
+
+        query = sql.SQL(
+            "SELECT {select_list} FROM {table} WHERE {where_clause} LIMIT %s"
+        ).format(
+            select_list=select_list,
+            table=self._qualified_table(),
+            where_clause=sql.SQL(where_sql),
+        )
+
+        with psycopg2.connect(self.connection_uri) as conn:
+            with conn.cursor() as cur:
+                self._prepare_connection(cur)
+                cur.execute(query, [*filter_params, top_k])
+                rows = cur.fetchall()
+        return self._rows_to_matches(rows)
     def test_connection(self) -> tuple[bool, str]:
         try:
             with psycopg2.connect(self.connection_uri) as conn:
@@ -305,16 +389,34 @@ class PgVectorAdapter:
             return True, f"pgvector table '{self.table_name}' already exists."
         id_col = self.id_column or "id"
         meta_col = self.metadata_column or "metadata"
+        dim = int(vector_dim)
+        if dim <= 0:
+            return False, f"Invalid vector_dim={vector_dim!r}."
+
         conn = psycopg2.connect(self.connection_uri)
         try:
             with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                if self.schema_name:
+                    cur.execute(
+                        sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                            sql.Identifier(self.schema_name)
+                        )
+                    )
+
+                # Resolve schema that owns the vector type (may be non-public).
+                vector_schema = self._resolve_vector_type_schema(cur)
+                cur.execute(
+                    sql.SQL("SET search_path TO {}, public").format(sql.Identifier(vector_schema))
+                )
+
                 table_ident = self._qualified_table()
                 create_sql = sql.SQL(
                     """
                     CREATE TABLE {} (
                         {} TEXT PRIMARY KEY,
                         {} TEXT,
-                        {} vector({}),
+                        {} {}.vector({}),
                         {} JSONB
                     )
                     """
@@ -323,12 +425,13 @@ class PgVectorAdapter:
                     sql.Identifier(id_col),
                     sql.Identifier(self.content_column),
                     sql.Identifier(self.embedding_column),
-                    sql.Literal(vector_dim),
+                    sql.Identifier(vector_schema),
+                    sql.SQL(str(dim)),
                     sql.Identifier(meta_col),
                 )
                 cur.execute(create_sql)
                 conn.commit()
-            return True, f"Created pgvector table '{self.table_name}' with vector({vector_dim})."
+            return True, f"Created pgvector table '{self.table_name}' with {vector_schema}.vector({dim})."
         except Exception as exc:
             conn.rollback()
             return False, f"Failed to create pgvector table: {exc}"
@@ -343,6 +446,7 @@ class PgVectorAdapter:
         conn = psycopg2.connect(self.connection_uri)
         try:
             with conn.cursor() as cur:
+                self._prepare_connection(cur)
                 table_ident = self._qualified_table()
                 for i in range(0, len(records), batch_size):
                     for rec in records[i : i + batch_size]:

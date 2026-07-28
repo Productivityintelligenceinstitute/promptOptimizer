@@ -74,6 +74,7 @@ def create_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+    _attach_lifecycle_handoff(db, owner, job_id, run.id, getattr(data, "parent_run_id", None))
     queued = enqueue_run(run.id)
     if not queued:
         run.state = "failed"
@@ -91,6 +92,90 @@ def create_run(
         raise ValueError("Context jobs queue is full. Please retry shortly.")
     record_run_created(db, owner)
     return run
+
+
+def _attach_lifecycle_handoff(
+    db: Session,
+    owner: str,
+    child_job_id: UUID,
+    child_run_id: UUID,
+    parent_run_id: UUID | None,
+) -> None:
+    """Link a newly created child run to an awaiting lifecycle handoff row."""
+    query = (
+        db.query(RunChainModel)
+        .filter(
+            RunChainModel.child_job_id == child_job_id,
+            RunChainModel.status == "awaiting_handoff",
+            RunChainModel.child_run_id.is_(None),
+        )
+        .order_by(RunChainModel.created_at.desc())
+    )
+    if parent_run_id is not None:
+        query = query.filter(RunChainModel.parent_run_id == parent_run_id)
+    chain = query.first()
+    if not chain:
+        return
+    parent = get_run(db, chain.parent_run_id, owner)
+    if not parent:
+        return
+    chain.child_run_id = child_run_id
+    chain.status = "running"
+    db.add(chain)
+    db.commit()
+
+
+def get_pending_handoff_for_job(
+    db: Session,
+    owner: str,
+    job_id: UUID,
+    *,
+    parent_run_id: UUID | None = None,
+) -> dict[str, Any] | None:
+    """Return the latest awaiting handoff targeting this job, if any."""
+    if not get_job(db, job_id, owner):
+        raise ContextJobsNotFoundError("Job not found")
+
+    query = (
+        db.query(RunChainModel)
+        .filter(
+            RunChainModel.child_job_id == job_id,
+            RunChainModel.status == "awaiting_handoff",
+            RunChainModel.child_run_id.is_(None),
+        )
+        .order_by(RunChainModel.created_at.desc())
+    )
+    if parent_run_id is not None:
+        query = query.filter(RunChainModel.parent_run_id == parent_run_id)
+    chain = query.first()
+    if not chain:
+        return None
+
+    parent = get_run(db, chain.parent_run_id, owner)
+    if not parent:
+        return None
+
+    mapping = chain.input_mapping if isinstance(chain.input_mapping, dict) else {}
+    suggested = str(mapping.get("userRequest") or "").strip()
+    if not suggested:
+        rop = parent.run_output_package if isinstance(parent.run_output_package, dict) else {}
+        handoff = rop.get("lifecycleHandoff") if isinstance(rop, dict) else None
+        if isinstance(handoff, dict):
+            suggested = str(handoff.get("suggestedUserRequest") or "").strip()
+
+    label = None
+    rop = parent.run_output_package if isinstance(parent.run_output_package, dict) else {}
+    handoff = rop.get("lifecycleHandoff") if isinstance(rop, dict) else None
+    if isinstance(handoff, dict):
+        label = handoff.get("label")
+
+    return {
+        "parentRunId": chain.parent_run_id,
+        "childJobId": chain.child_job_id,
+        "suggestedUserRequest": suggested,
+        "label": label,
+        "status": chain.status,
+    }
 
 
 def record_human_decision(

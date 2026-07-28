@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -74,6 +75,28 @@ async def get_job(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return job
+
+
+@router.get(
+    "/jobs/{job_id}/pending-handoff",
+    response_model=cj_schemas.JobPendingHandoffOut,
+)
+async def get_job_pending_handoff(
+    job_id: UUID,
+    parent_run_id: Optional[UUID] = Query(None, alias="parentRunId"),
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+):
+    """Latest lifecycle handoff waiting on this job (pre-filled next-step request)."""
+    try:
+        handoff = cj_services.get_pending_handoff_for_job(
+            db, owner, job_id, parent_run_id=parent_run_id
+        )
+    except Exception as exc:
+        raise_context_jobs_http(exc)
+    if not handoff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending handoff")
+    return handoff
 
 
 @router.get("/jobs/{job_id}/versions", response_model=list[cj_schemas.ContextJobVersionOut])

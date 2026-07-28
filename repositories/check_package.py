@@ -42,12 +42,15 @@ class CheckPackageRepository:
             return
 
         if package.package_name != "free":
-            if (
-                not subscription.start_date
-                or not subscription.end_date
-                or subscription.start_date > now
-                or subscription.end_date < now
-            ):
+            # Paid plans (pro/essential): require a started subscription.
+            # end_date may be null for admin/manual grants (open-ended).
+            # Stripe-backed subs always set end_date to the current period end.
+            if not subscription.start_date or subscription.start_date > now:
+                raise HTTPException(
+                    status_code=403,
+                    detail="No active subscription",
+                )
+            if subscription.end_date is not None and subscription.end_date < now:
                 raise HTTPException(
                     status_code=403,
                     detail="No active subscription",
@@ -65,7 +68,8 @@ class CheckPackageRepository:
         Rules:
         - If no active subscription exists → 403
         - If package is "trial" → require end_date >= now (14-day window)
-        - If package is paid (not "free" or "trial") → require start_date <= now <= end_date
+        - If package is paid (not "free" or "trial") → require start_date <= now,
+          and if end_date is set then end_date >= now (null end_date = open-ended)
         - If package is "free" → legacy behavior: no time check, allowed
         """
         result = CheckPackageRepository.get_active_package_subscription(db, user_id)

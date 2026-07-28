@@ -51,7 +51,7 @@ def resolve_ingestion_target(db: Session, job: ContextJobModel) -> IngestionTarg
         )
 
     vector_conn = get_active_connection_for_owner(db, conn_id, owner)
-    return _ingestion_target_from_connection(vector_conn)
+    return _ingestion_target_from_connection(vector_conn, db=db)
 
 
 def resolve_external_ingestion_target(
@@ -61,15 +61,21 @@ def resolve_external_ingestion_target(
 ) -> IngestionTarget:
     """Build an ingestion target from a saved external vector connection (no job required)."""
     vector_conn = get_active_connection_for_owner(db, vector_connection_id, owner)
-    return _ingestion_target_from_connection(vector_conn)
+    return _ingestion_target_from_connection(vector_conn, db=db)
 
 
 def _ingestion_target_from_connection(
     vector_conn: ContextVectorConnectionModel,
+    db: Session | None = None,
 ) -> IngestionTarget:
     from context_jobs.retrieval.factory import get_retrieval_adapter
+    from context_jobs.retrieval.security import hydrate_embedding_credentials
 
-    embed_config = decrypt_config(vector_conn.encrypted_config or {})
+    embed_config = hydrate_embedding_credentials(
+        decrypt_config(vector_conn.encrypted_config or {}),
+        db=db,
+        owner=vector_conn.owner,
+    )
     provider = (vector_conn.provider or "").lower().strip()
     adapter: VectorIngestionAdapter = get_retrieval_adapter(provider, embed_config)
 

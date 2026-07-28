@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -32,7 +33,7 @@ from context_jobs.gateway.execution_limits import (
 from context_jobs.gateway.guardrail_gateway import GatewayToolExecutor
 from context_jobs.memory.memory_service import persist_memory_updates
 from context_jobs.provider_key_services import resolve_llm_api_key
-from context_jobs.providers.base import ExecutionEnvelope
+from context_jobs.providers.base import ExecutionEnvelope, ToolCall
 from context_jobs.providers.registry import get_default_model, get_provider_adapter
 from context_jobs.rop.builder import build_run_output_package, determine_terminal_state
 from context_jobs.run_workflows import (
@@ -49,6 +50,56 @@ from database.database import SessionLocal
 from schemas.context_jobs_model import ContextJobModel, ContextJobVersionModel, JobRunModel
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_enabled(job: ContextJobModel, tool_id: str) -> bool:
+    for perm in job.tool_permissions or []:
+        if not isinstance(perm, dict) or not perm.get("enabled"):
+            continue
+        candidate = perm.get("toolId") or perm.get("tool_id")
+        if candidate == tool_id:
+            return True
+    return False
+
+
+async def _prerun_contract_analyzer(
+    tool_executor: GatewayToolExecutor,
+    job: ContextJobModel,
+    retrieved_context: str,
+) -> str | None:
+    """
+    Deterministically run contract-analyzer before the LLM loop for contract_review.
+
+    Models often skip the tool when RAG already has the MSA text; validation still
+    requires structured analyzer output for mandatory_clause.
+    """
+    if (job.workflow_type or "").lower() != "contract_review":
+        return None
+    if not _tool_enabled(job, "contract-analyzer"):
+        return None
+    if not (retrieved_context or "").strip():
+        return None
+
+    call = ToolCall(
+        id=f"prerun-{uuid.uuid4()}",
+        tool_id="contract-analyzer",
+        tool_name="Contract Analyzer",
+        arguments={
+            "source": "text",
+            # Gateway consolidates full retrieved_context for source=text.
+            "value": retrieved_context[:4000],
+            "contractType": "msa",
+        },
+    )
+    result = await tool_executor(call)
+    if result.is_error:
+        logger.warning(
+            "Pre-run contract-analyzer failed for job %s: %s",
+            job.id,
+            (result.content or "")[:300],
+        )
+        return None
+    return result.content
 
 
 def execute_run_sync(run_id: UUID) -> None:
@@ -107,6 +158,10 @@ async def _execute_run_async(run_id: UUID) -> None:
             system_prompt = build_system_prompt(job, run.user_request or "")
             memory_context = load_memory_context(job.owner, job.id, job.memory_config, db)
             tools = resolve_tools(job.tool_permissions, db)
+            # Supplier assessment must stay grounded in retrieved vendor evidence.
+            # Existing jobs may still list web-search — strip it at runtime.
+            if (job.workflow_type or "").lower() == "supplier_assessment":
+                tools = [tool for tool in tools if tool.id != "web-search"]
             agent_catalog = compile_agent_catalog(job)
             delegate_tool = build_delegate_tool_definition(agent_catalog)
             if delegate_tool:
@@ -116,7 +171,7 @@ async def _execute_run_async(run_id: UUID) -> None:
             await _run_stage(db, run, "retrieving", "Executing retrieval pipeline")
             combined_for_hints = f"{job.goal or ''}\n\n{run.user_request or ''}".strip()
             retrieval_hints = extract_retrieval_hints(combined_for_hints)
-            if (job.workflow_type or "").lower() in {"contract_review", "analysis", "procurement"}:
+            if (job.workflow_type or "").lower() == "contract_review":
                 retrieval_hints.setdefault("contractRenewal", True)
             retrieval = execute_retrieval(
                 job,
@@ -145,7 +200,7 @@ async def _execute_run_async(run_id: UUID) -> None:
                     model=model,
                     api_key=api_key,
                     catalog=agent_catalog,
-                    base_tool_definitions=resolve_tools(job.tool_permissions, db),
+                    base_tool_definitions=tools,
                 )
 
             await _run_stage(db, run, "executing", f"Executing with provider {provider}")
@@ -272,13 +327,13 @@ async def _execute_run_async(run_id: UUID) -> None:
                 db.commit()
 
             db.refresh(run)
-            if run.state == "completed":
+            if run.state in ("completed", "completed_with_warnings"):
                 try:
-                    from context_jobs.chain_runner import evaluate_chain
+                    from context_jobs.chain_runner import prepare_chain_handoff
 
-                    evaluate_chain(run.id, run.run_output_package or rop, db)
+                    prepare_chain_handoff(run.id, run.run_output_package or rop, db)
                 except Exception:
-                    logger.exception("Chain evaluation failed for run %s", run.id)
+                    logger.exception("Chain handoff preparation failed for run %s", run.id)
 
             chain_status = None
             if run.state in ("completed", "completed_with_warnings"):
@@ -340,6 +395,15 @@ async def _execute_with_provider(
         allow_delegation=bool(delegate_runner),
         retrieved_context=retrieved_context,
     )
+    analyzer_json = await _prerun_contract_analyzer(tool_executor, job, retrieved_context)
+    if analyzer_json:
+        user_message = (
+            f"{user_message}\n\n"
+            "## Pre-run contract-analyzer output (trusted structured extraction)\n"
+            "Use this JSON as the primary clause inventory. Still cite Retrieved Context.\n"
+            f"{analyzer_json}"
+        )
+        envelope = replace(envelope, user_message=user_message)
     adapter = get_provider_adapter(provider)
     response = await adapter.execute(envelope, api_key, tool_executor)
     budget_tracker.record_tokens(response.input_tokens, response.output_tokens, response.model)

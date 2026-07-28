@@ -1,0 +1,13 @@
+role,level,region,currency,hourly_rate,effective_date,notes
+Cloud Architect,L5,US,USD,245,2024-01-01,Standard remote
+Cloud Architect,L4,US,USD,195,2024-01-01,Standard remote
+SRE,L4,US,USD,185,2024-01-01,On-call premium excluded
+SRE,L3,US,USD,145,2024-01-01,Standard remote
+Data Engineer,L4,US,USD,175,2024-01-01,Includes ETL tooling
+Data Engineer,L3,US,USD,135,2024-01-01,Standard remote
+Security Engineer,L5,US,USD,230,2024-01-01,Clearance not required
+Project Manager,L4,US,USD,160,2024-01-01,Agile delivery
+Business Analyst,L3,US,USD,125,2024-01-01,Standard remote
+Cloud Architect,L5,EU,EUR,220,2024-01-01,VAT excluded
+SRE,L4,EU,EUR,170,2024-01-01,VAT excluded
+Data Engineer,L4,APAC,USD,155,2024-01-01,Offshore blended

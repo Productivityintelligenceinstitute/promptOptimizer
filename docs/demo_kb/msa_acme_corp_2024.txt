@@ -1,0 +1,38 @@
+MASTER SERVICE AGREEMENT
+Acme Cloud Services Inc. ("Provider") and Jet Industries ("Customer")
+Contract ID: ACME-MSA-2024-001
+Effective Date: January 1, 2024
+Expiry Date: December 31, 2026
+Complexity Tier: medium
+
+1. SCOPE OF SERVICES
+Provider shall deliver cloud infrastructure, managed platform services, and related professional services as described in Statements of Work (SOWs) executed under this MSA. Deliverables, acceptance criteria, and timelines are defined in each SOW.
+
+2. FEES AND PAYMENT
+2.1 Fees are set forth in the applicable SOW or rate card.
+2.2 Invoices are due Net 30 from invoice date.
+2.3 Customer may audit fees and usage records once per calendar year with 15 business days' notice.
+
+3. CONFIDENTIALITY
+Each party shall protect the other party's Confidential Information with reasonable care and use it only for performing under this Agreement. Obligations survive for three (3) years after termination, or indefinitely for trade secrets.
+
+4. DATA PROTECTION AND SECURITY
+4.1 Provider shall implement industry-standard administrative, technical, and physical safeguards.
+4.2 Security incidents affecting Customer data must be notified within 72 hours of confirmation.
+4.3 Subprocessors require prior written approval and equivalent contractual flow-downs.
+
+5. AI AND DATA USE
+Provider shall not use Customer data to train general-purpose models without Customer's prior written consent. Synthetic derivatives that retain Customer Confidential Information are prohibited without approval.
+
+6. LIABILITY AND INDEMNITY
+6.1 Aggregate liability is capped at fees paid in the twelve (12) months preceding the claim, except for willful misconduct, IP infringement, and confidentiality breaches.
+6.2 Provider shall indemnify Customer against third-party claims alleging Provider IP infringement arising from the Services.
+
+7. TERM, RENEWAL, AND TERMINATION
+7.1 Initial term ends December 31, 2026.
+7.2 AUTO-RENEWAL: Unless either party provides written RENEWAL NOTICE at least ninety (90) days before expiry, this Agreement renews for successive one-year terms.
+7.3 Either party may terminate for material breach uncured within thirty (30) days of notice.
+7.4 Upon termination, Provider shall provide reasonable transition assistance for up to sixty (60) days at then-current rates.
+
+8. GOVERNING LAW
+This Agreement is governed by the laws of the State of Delaware, excluding conflict-of-law rules.

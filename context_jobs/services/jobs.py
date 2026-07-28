@@ -14,9 +14,11 @@ from context_jobs.services._validation import (
     maybe_ensure_jet_managed_namespace,
     validate_job_execution_for_plan,
     validate_job_vector_connection,
+    validate_tool_permissions_keys,
 )
 from context_jobs.services.assets import list_assets, import_assets_into_job
 from context_jobs.services.job_queries import get_job, get_template_job, list_jobs, list_template_jobs
+from context_jobs.services.job_stats import aggregate_job_stats
 from context_jobs.services.runs import list_runs
 from context_jobs.services.versioning import (
     ensure_job_version_seed,
@@ -43,12 +45,26 @@ def _normalize_job_payload(payload: dict) -> dict:
     return payload
 
 
+def _normalize_linked_asset_ids(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> ContextJobModel:
     package_name = ensure_context_jobs_access(db, owner)
     assert_can_create_job(db, owner, package_name)
     ws = ensure_default_workspace(db, owner)
     payload = _normalize_job_payload(data.model_dump(by_alias=False))
-    asset_ids = payload.pop("asset_ids", None) or []
+    asset_ids = _normalize_linked_asset_ids(payload.pop("asset_ids", None) or [])
     payload["owner"] = owner
     payload["workspace_id"] = payload.get("workspace_id") or ws.id
     payload["status"] = "published"
@@ -65,9 +81,14 @@ def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> Co
     payload["llm_key_id"] = key_id
     check = cj_schemas.ContextJobCreate(**payload)
     validate_job_vector_connection(db, check, owner)
+    validate_tool_permissions_keys(db, owner, payload.get("tool_permissions"))
+    # Lifecycle chaining is guidance-only; never persist chain wiring on user jobs.
+    payload["chain_config"] = None
+    payload["linked_child_job_id"] = None
+    payload["linked_asset_ids"] = asset_ids
     job = ContextJobModel(**payload)
     if asset_ids:
-        import_assets_into_job(db, owner, job, asset_ids)
+        import_assets_into_job(db, owner, job, [UUID(item) for item in asset_ids])
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -106,7 +127,7 @@ def update_job(
 ) -> ContextJobModel:
     package_name = ensure_context_jobs_access(db, owner)
     payload = _normalize_job_payload(data.model_dump(exclude_unset=True, by_alias=False))
-    asset_ids = payload.pop("asset_ids", None)
+    asset_ids_raw = payload.pop("asset_ids", None)
     merged_mode = payload.get("retrieval_mode", job.retrieval_mode)
     merged_conn = payload.get("vector_connection_id", job.vector_connection_id)
     merged_key = payload.get("llm_key_id", job.llm_key_id)
@@ -140,11 +161,17 @@ def update_job(
         payload["execution_provider"] = provider
         payload["execution_model"] = model
         payload["llm_key_id"] = key_id
+    merged_tools = payload.get("tool_permissions", job.tool_permissions)
+    if "tool_permissions" in payload or merged_tools:
+        validate_tool_permissions_keys(db, owner, merged_tools)
     ensure_job_version_seed(db, job, created_by=owner)
     for key, value in payload.items():
         setattr(job, key, value)
-    if asset_ids:
-        import_assets_into_job(db, owner, job, asset_ids)
+    if asset_ids_raw is not None:
+        asset_ids = _normalize_linked_asset_ids(asset_ids_raw)
+        job.linked_asset_ids = asset_ids
+        if asset_ids:
+            import_assets_into_job(db, owner, job, [UUID(item) for item in asset_ids])
     job.owner = owner
     job.version = latest_job_version_number(db, job.id) + 1
     db.add(job)
@@ -208,6 +235,7 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
         job.execution_model,
         job.llm_key_id,
     )
+    validate_tool_permissions_keys(db, owner, job.tool_permissions)
     duplicated = ContextJobModel(
         name=f"{job.name} (Copy)",
         description=job.description,
@@ -229,7 +257,7 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
         glossary_terms=job.glossary_terms,
         relationships=job.relationships,
         trusted_sources=job.trusted_sources,
-        chain_config=job.chain_config,
+        chain_config=None,
         execution_provider=provider,
         execution_model=model,
         llm_key_id=key_id,
@@ -240,6 +268,7 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
         approval_required=job.approval_required,
         policy_profile=job.policy_profile,
         workspace_id=job.workspace_id or ws.id,
+        linked_asset_ids=list(job.linked_asset_ids or []) if isinstance(job.linked_asset_ids, list) else [],
     )
     db.add(duplicated)
     db.commit()
@@ -269,6 +298,7 @@ def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> Cont
         template.execution_model,
         template.llm_key_id,
     )
+    validate_tool_permissions_keys(db, owner, template.tool_permissions)
     job = ContextJobModel(
         name=template.name,
         description=template.description,
@@ -290,7 +320,7 @@ def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> Cont
         glossary_terms=template.glossary_terms,
         relationships=template.relationships,
         trusted_sources=template.trusted_sources,
-        chain_config=template.chain_config,
+        chain_config=None,
         execution_provider=provider,
         execution_model=model,
         llm_key_id=key_id,
@@ -353,12 +383,13 @@ def build_job_config_from_template(
         template.execution_model,
         template.llm_key_id,
         allow_model_fallback=True,
+        require_key=False,
     )
     payload = _normalize_job_payload(
         {
             "name": template.name,
             "description": template.description,
-            "status": "published",
+            "status": "draft",
             "goal": template.goal,
             "semantic_blueprint": template.semantic_blueprint,
             "output_template": template.output_template,
@@ -376,7 +407,7 @@ def build_job_config_from_template(
             "glossary_terms": template.glossary_terms,
             "relationships": template.relationships,
             "trusted_sources": template.trusted_sources,
-            "chain_config": template.chain_config,
+            "chain_config": None,
             "execution_provider": provider,
             "execution_model": model,
             "llm_key_id": key_id,
@@ -398,42 +429,7 @@ def get_job_stats(db: Session, owner: str, job_id: UUID) -> dict:
     if not get_job(db, job_id, owner):
         raise ContextJobsNotFoundError("Job not found")
     runs = db.query(JobRunModel).filter(JobRunModel.job_id == job_id).all()
-    total_runs = len(runs)
-    completed_runs = len([r for r in runs if r.state == "completed"])
-    failed_runs = len([r for r in runs if r.state == "failed"])
-    escalated_runs = len([r for r in runs if r.state == "escalated"])
-    repair_runs = len([r for r in runs if r.state == "repair"])
-    terminal_runs = [r for r in runs if r.state in {"completed", "failed", "escalated", "repair"}]
-    completion_rate = int((completed_runs / len(terminal_runs)) * 100) if terminal_runs else 0
-    avg_latency = (
-        round(sum((r.latency_ms or 0) for r in terminal_runs) / len(terminal_runs), 2)
-        if terminal_runs
-        else 0
-    )
-    recent_runs = sorted(
-        runs,
-        key=lambda r: r.started_at or datetime.min.replace(tzinfo=timezone.utc),
-        reverse=True,
-    )[:5]
-    return {
-        "totalRuns": total_runs,
-        "completedRuns": completed_runs,
-        "failedRuns": failed_runs,
-        "escalatedRuns": escalated_runs,
-        "repairRuns": repair_runs,
-        "completionRate": completion_rate,
-        "averageLatencyMs": avg_latency,
-        "recentRuns": [
-            {
-                "runId": str(r.id),
-                "state": r.state,
-                "startedAt": r.started_at.isoformat() if r.started_at else None,
-                "endedAt": r.ended_at.isoformat() if r.ended_at else None,
-                "outcome": r.outcome,
-            }
-            for r in recent_runs
-        ],
-    }
+    return aggregate_job_stats(runs)
 
 
 def get_overall_stats(db: Session, owner: str) -> dict:

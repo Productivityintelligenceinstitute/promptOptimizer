@@ -8,8 +8,9 @@ from typing import Any
 
 from context_jobs.ingestion.metadata_inference import normalize_vendor_id
 
+# Matches demo/production IDs such as ACME-MSA-2024-001 and AB-2024-CD-1234.
 _CONTRACT_ID_RE = re.compile(
-    r"\b([A-Z]{2,}-\d{4}-[A-Z]{2,}-\d{4})\b",
+    r"\b([A-Z]{2,}(?:-[A-Z0-9]{2,}){2,})\b",
     re.IGNORECASE,
 )
 _ISO_DATE_RE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
@@ -50,10 +51,11 @@ _VENDOR_ID_LABEL_RE = re.compile(
     r'\bvendor[_\s-]?id\s*[:=]\s*["\']?([A-Za-z0-9][A-Za-z0-9_-]*)',
     re.IGNORECASE,
 )
+# Require Vendor: / Vendor = so phrases like "vendor rate cards" are not treated as names.
 _VENDOR_LABEL_RE = re.compile(
-    r"(?i)\bvendor\s*:\s*"
+    r"(?i)\b(?:for\s+)?vendor\s*[:=]\s+"
     r"([A-Za-z0-9&.,'\- ]+?)"
-    r"(?:\s*\.(?=\s*(?:contract|expiry|estimated)\b)|\s*\.?\s*$|\n)",
+    r"(?=\s*,|\s*\.|$|\n|\s+contract\b|\s+expiry\b|\s+estimated\b|\s+rate\b)",
 )
 _CONTRACT_RENEWAL_MARKERS = (
     "master service agreement",
@@ -84,6 +86,8 @@ _META_LINE_KEYS = (
     "category",
     "expiryDate",
     "complexityTier",
+    "riskTier",
+    "spendTier",
     "chunkIndex",
     "sourceDocId",
 )
@@ -92,7 +96,25 @@ _VENDOR_PROFILE_RISK_TIERS = frozenset({"low", "medium", "high"})
 _VENDOR_PROFILE_SPEND_TIERS = frozenset({"1", "2", "3"})
 
 _SKIP_VENDOR_TOKENS = frozenset(
-    {"the", "this", "active", "supplier", "review", "for", "our", "your"}
+    {
+        "the",
+        "this",
+        "active",
+        "supplier",
+        "review",
+        "for",
+        "our",
+        "your",
+        "rate",
+        "rates",
+        "card",
+        "cards",
+        "rate card",
+        "rate cards",
+        "variance",
+        "spend",
+        "taxonomy",
+    }
 )
 
 
@@ -208,6 +230,12 @@ def _clean_vendor_name(raw: str) -> str | None:
     if len(vendor) < 3 or vendor.lower() in _SKIP_VENDOR_TOKENS:
         return None
     if vendor.lower() in {"master service", "master services", "service", "agreement"}:
+        return None
+    # Reject generic procurement phrases accidentally captured as vendor names.
+    if re.fullmatch(
+        r"(?i)rate\s*cards?|job\s*taxonomy|spend\s*concentration|professional\s*services",
+        vendor,
+    ):
         return None
     return vendor
 
@@ -558,6 +586,13 @@ def metadata_match_score(
             score += 1.0
 
     doc_type = (meta.get("documentType") or meta.get("document_type") or "").lower()
+    preferred_types = {
+        str(item).strip().lower()
+        for item in (hints.get("documentTypes") or [])
+        if str(item).strip()
+    }
+    if preferred_types and doc_type in preferred_types:
+        score += 3.0
     if doc_type == "policy" and (hints.get("contractIds") or hints.get("contractRenewal")):
         score -= 2.0
 
@@ -608,10 +643,17 @@ def resolve_contract_vendor_id_for_filter(hints: dict[str, Any]) -> str | None:
 
 def build_contract_vendor_metadata_filter(hints: dict[str, Any]) -> dict[str, Any] | None:
     """
-    Pinecone metadata filter on vendorId for contract-scoped retrieval.
+    Metadata-only contract retrieval filter.
 
-    vendorId is inferred at ingestion (LLM + normalization) and stored on every chunk.
+    Prefer contractId when present (stable on demo/ingested contracts). Fall back to
+    vendorId inferred from prompt hints.
     """
+    contract_ids = [str(cid).strip().upper() for cid in (hints.get("contractIds") or []) if str(cid).strip()]
+    if len(contract_ids) == 1:
+        return {"contractId": {"$eq": contract_ids[0]}}
+    if len(contract_ids) > 1:
+        return {"$or": [{"contractId": {"$eq": cid}} for cid in contract_ids]}
+
     vendor_id = resolve_contract_vendor_id_for_filter(hints)
     if not vendor_id:
         return None
@@ -624,8 +666,20 @@ build_contract_name_metadata_filter = build_contract_vendor_metadata_filter
 
 
 def build_pinecone_metadata_filter(hints: dict[str, Any]) -> dict[str, Any] | None:
-    """Pinecone filter for contract-scoped retrieval from prompt hints."""
+    """Pinecone filter for scoped retrieval from prompt hints."""
     clauses: list[dict[str, Any]] = []
+
+    document_types = [
+        str(item).strip().lower()
+        for item in (hints.get("documentTypes") or [])
+        if str(item).strip()
+    ]
+    if len(document_types) == 1:
+        clauses.append({"documentType": {"$eq": document_types[0]}})
+    elif len(document_types) > 1:
+        clauses.append(
+            {"$or": [{"documentType": {"$eq": doc_type}} for doc_type in document_types]}
+        )
 
     contract_ids = hints.get("contractIds") or []
     if len(contract_ids) == 1:
@@ -633,12 +687,21 @@ def build_pinecone_metadata_filter(hints: dict[str, Any]) -> dict[str, Any] | No
     elif len(contract_ids) > 1:
         clauses.append({"$or": [{"contractId": {"$eq": cid}} for cid in contract_ids]})
 
+    # Exact vendor $eq is fragile (stored party can be customer vs provider, and
+    # prompts often extract a short token like "Acme"). Prefer contractId/vendorId.
     vendors = hints.get("vendors") or []
-    if len(vendors) == 1 and not contract_ids:
-        clauses.append({"vendor": {"$eq": vendors[0]}})
+    if len(vendors) == 1 and not contract_ids and " " in str(vendors[0]).strip():
+        clauses.append(
+            {
+                "$or": [
+                    {"vendor": {"$eq": vendors[0]}},
+                    {"vendorName": {"$eq": vendors[0]}},
+                ]
+            }
+        )
 
     expiry_dates = hints.get("expiryDates") or []
-    if len(expiry_dates) == 1 and not contract_ids:
+    if len(expiry_dates) == 1 and not contract_ids and not vendors:
         clauses.append({"expiryDate": {"$eq": expiry_dates[0]}})
 
     if not clauses:
@@ -704,6 +767,8 @@ def format_context_block_header(meta: dict[str, Any] | None, match_id: str | Non
         ("vendorId", ("vendorId", "vendor_id")),
         ("expiryDate", ("expiryDate", "expiry_date")),
         ("category", ("category",)),
+        ("riskTier", ("riskTier", "risk_tier")),
+        ("spendTier", ("spendTier", "spend_tier")),
     ):
         value = _coalesce_str(meta, *aliases)
         if value:
@@ -747,6 +812,10 @@ def trace_metadata_from_match(meta: dict[str, Any] | None, match_id: str | None 
         aliases = (key, key.replace("Id", "_id") if "Id" in key else key)
         if key == "contractName":
             aliases = ("title", "name", "contractName", "contract_name")
+        elif key == "riskTier":
+            aliases = ("riskTier", "risk_tier")
+        elif key == "spendTier":
+            aliases = ("spendTier", "spend_tier")
         value = _coalesce_str(meta, *aliases)
         if value:
             out[key] = value

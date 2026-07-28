@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from constants.file_types import ALLOWED_EXTS
@@ -16,6 +16,8 @@ from context_jobs import services as cj_services
 from context_jobs.ingestion.ingestion_service import ingest_documents
 from context_jobs.ingestion.types import IngestionResult
 from utils.reader import read_file
+
+import json
 
 
 router = APIRouter(tags=["Context Jobs"])
@@ -162,6 +164,7 @@ def _extract_text_from_upload(upload: UploadFile, raw: bytes) -> str:
 async def ingest_files_into_job(
     job_id: UUID,
     files: list[UploadFile] = File(...),
+    metadata_json: str | None = Form(None, alias="metadataJson"),
     owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ):
@@ -169,9 +172,8 @@ async def ingest_files_into_job(
     Upload PDF, DOCX, or plain-text files; the server extracts text and ingests it
     into the job's configured vector target (managed Jet KB or external connection).
 
-    Reuses the existing text-ingestion pipeline: each file's extracted text becomes a
-    document with metadata.documentName = filename. Contract metadata (vendor, expiry,
-    etc.) is still inferred server-side from the extracted text.
+    Optional form field ``metadataJson``: JSON object of string metadata applied to
+    every uploaded file (merged with documentName=filename) for trusted-source scoping.
     """
     job = cj_services.get_job(db, job_id, owner)
     if not job:
@@ -184,6 +186,22 @@ async def ingest_files_into_job(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Too many files uploaded (max {MAX_UPLOAD_FILES}).",
         )
+
+    shared_meta: dict[str, Any] = {}
+    if metadata_json and metadata_json.strip():
+        try:
+            parsed = json.loads(metadata_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"metadataJson must be valid JSON: {exc}",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="metadataJson must be a JSON object of key/value pairs.",
+            )
+        shared_meta = parsed
 
     documents: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -216,7 +234,8 @@ async def ingest_files_into_job(
             })
             continue
 
-        documents.append({"text": text, "metadata": {"documentName": filename}, "id": None})
+        meta = {**shared_meta, "documentName": filename}
+        documents.append({"text": text, "metadata": meta, "id": None})
 
     if not documents:
         raise HTTPException(

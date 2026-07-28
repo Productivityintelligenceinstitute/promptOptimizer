@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.retrieval.factory import get_retrieval_adapter
-from context_jobs.retrieval.security import decrypt_config, encrypt_config
+from context_jobs.retrieval.security import decrypt_config, encrypt_config, hydrate_embedding_credentials
 from context_jobs.vector_connection_schemas import VectorConnectionCreate, VectorConnectionUpdate
 from schemas.context_vector_connection_model import ContextVectorConnectionModel
 
@@ -20,10 +20,33 @@ class VectorConnectionTestFailed(Exception):
         self.provider = provider
 
 
-def test_connection_config(provider: str, config: dict[str, Any]) -> tuple[bool, str]:
+def _prepare_config_for_use(
+    config: dict[str, Any],
+    *,
+    db: Session,
+    owner: str,
+) -> dict[str, Any]:
+    return hydrate_embedding_credentials(dict(config or {}), db=db, owner=owner)
+
+
+def test_connection_config(
+    provider: str,
+    config: dict[str, Any],
+    *,
+    db: Session | None = None,
+    owner: str | None = None,
+) -> tuple[bool, str]:
     """Run provider adapter test against config dict (no DB row required)."""
-    adapter = get_retrieval_adapter((provider or "").lower(), config or {})
-    return adapter.test_connection()
+    try:
+        prepared = (
+            _prepare_config_for_use(config, db=db, owner=owner)
+            if db and owner
+            else dict(config or {})
+        )
+        adapter = get_retrieval_adapter((provider or "").lower(), prepared)
+        return adapter.test_connection()
+    except Exception as exc:
+        return False, str(exc) or f"{provider} connection test failed."
 
 
 def _apply_test_result(
@@ -62,17 +85,24 @@ def get_connection(
 def create_connection(
     db: Session, payload: VectorConnectionCreate, owner: str = "current_user"
 ) -> ContextVectorConnectionModel:
+    from context_jobs.security.key_encryption import KeyEncryptionError
+
     owner_key = (payload.owner or owner).strip() or "current_user"
     provider = payload.provider.lower()
-    ok, message = test_connection_config(provider, payload.config)
+    ok, message = test_connection_config(provider, payload.config, db=db, owner=owner_key)
     if not ok:
         raise VectorConnectionTestFailed(message, provider=provider)
+
+    try:
+        encrypted = encrypt_config(payload.config)
+    except KeyEncryptionError as exc:
+        raise ValueError(str(exc)) from exc
 
     conn = ContextVectorConnectionModel(
         owner=owner_key,
         name=payload.name,
         provider=provider,
-        encrypted_config=encrypt_config(payload.config),
+        encrypted_config=encrypted,
         status="active",
     )
     _apply_test_result(conn, True, message)
@@ -90,7 +120,7 @@ def update_connection(
     if payload.status is not None:
         conn.status = payload.status
     if payload.config is not None:
-        ok, message = test_connection_config(conn.provider, payload.config)
+        ok, message = test_connection_config(conn.provider, payload.config, db=db, owner=conn.owner)
         if not ok:
             raise VectorConnectionTestFailed(message, provider=conn.provider)
         conn.encrypted_config = encrypt_config(payload.config)
@@ -109,7 +139,7 @@ def soft_delete_connection(db: Session, conn: ContextVectorConnectionModel) -> N
 
 def test_connection(db: Session, conn: ContextVectorConnectionModel) -> tuple[bool, str]:
     config = decrypt_config(conn.encrypted_config or {})
-    ok, message = test_connection_config(conn.provider, config)
+    ok, message = test_connection_config(conn.provider, config, db=db, owner=conn.owner)
     _apply_test_result(conn, ok, message)
     db.add(conn)
     db.commit()

@@ -134,18 +134,62 @@ def merge_inferred_metadata(
     client_meta: dict[str, Any] | None,
     inferred: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Apply LLM inference, then overlay optional client document name/title."""
+    """
+    Merge LLM inference with client metadata.
+
+    Client non-empty values win for identity and forced procurement fields
+    (documentType, contractId, expiryDate, description, etc.).
+    """
     merged: dict[str, Any] = {}
     for key, value in (inferred or {}).items():
         if not _empty(value):
             merged[key] = value
 
     client = dict(client_meta or {})
+    client_wins = {
+        "name",
+        "title",
+        "documentName",
+        "document_name",
+        "documentType",
+        "document_type",
+        "contractId",
+        "contract_id",
+        "contractName",
+        "vendor",
+        "vendorName",
+        "vendor_name",
+        "vendorId",
+        "vendor_id",
+        "expiryDate",
+        "expiry_date",
+        "complexityTier",
+        "complexity_tier",
+        "description",
+        "category",
+        "workspace_id",
+        "workspaceId",
+        "file",
+        "source",
+        "url",
+    }
+    for key in client_wins:
+        value = client.get(key)
+        if not _empty(value):
+            merged[key] = value
+
+    # Preserve client-stamped custom keys (trusted-source scoping) over inference.
+    for key, value in client.items():
+        if key in client_wins or _empty(value):
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            merged[key] = value
+
     doc_name = (
-        client.get("name")
-        or client.get("title")
-        or client.get("documentName")
-        or client.get("document_name")
+        merged.get("name")
+        or merged.get("title")
+        or merged.get("documentName")
+        or merged.get("document_name")
     )
     if doc_name and str(doc_name).strip():
         title = str(doc_name).strip()

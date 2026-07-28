@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import os
 import sys
 from functools import partial
 
@@ -93,24 +94,64 @@ def _run_procurement_monitor_job() -> None:
         db.close()
 
 
+def _procurement_monitor_interval() -> tuple[str, int]:
+    """
+    Return (unit, value) for APScheduler interval trigger.
+
+    Env (first match wins):
+      PROCUREMENT_MONITOR_INTERVAL_MINUTES=<int>  # demo-friendly
+      PROCUREMENT_MONITOR_INTERVAL_HOURS=<int>
+    Default: 24 hours.
+    """
+    minutes_raw = os.environ.get("PROCUREMENT_MONITOR_INTERVAL_MINUTES", "").strip()
+    if minutes_raw:
+        try:
+            minutes = max(1, int(minutes_raw))
+            return "minutes", minutes
+        except ValueError:
+            kb_logger.warning(
+                "Invalid PROCUREMENT_MONITOR_INTERVAL_MINUTES=%r; falling back to hours/default.",
+                minutes_raw,
+            )
+
+    hours_raw = os.environ.get("PROCUREMENT_MONITOR_INTERVAL_HOURS", "").strip()
+    if hours_raw:
+        try:
+            hours = max(1, int(hours_raw))
+            return "hours", hours
+        except ValueError:
+            kb_logger.warning(
+                "Invalid PROCUREMENT_MONITOR_INTERVAL_HOURS=%r; falling back to 24 hours.",
+                hours_raw,
+            )
+
+    return "hours", 24
+
+
 def _start_procurement_scheduler() -> None:
     global procurement_scheduler
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
 
+        unit, value = _procurement_monitor_interval()
+        trigger_kwargs = {unit: value}
         scheduler = BackgroundScheduler()
         scheduler.add_job(
             _run_procurement_monitor_job,
             trigger="interval",
-            days=1,
             id="procurement_contract_expiry_monitor",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
+            **trigger_kwargs,
         )
         scheduler.start()
         procurement_scheduler = scheduler
-        kb_logger.info("Started procurement contract expiry monitor scheduler (daily).")
+        kb_logger.info(
+            "Started procurement contract expiry monitor scheduler (every %s %s).",
+            value,
+            unit,
+        )
     except Exception:
         kb_logger.exception("Failed to start procurement contract expiry monitor scheduler")
 

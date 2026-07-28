@@ -20,6 +20,11 @@ _RISK_TIER_RE = re.compile(
     r'"riskTier"\s*:\s*"(low|medium|high|critical)"',
     re.IGNORECASE,
 )
+# Prose forms used in vendor profiles / Full markdown outputs.
+_RISK_TIER_PROSE_RE = re.compile(
+    r"\brisk\s*tiers?\s*[:=-]?\s*(low|medium|high|critical)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -116,10 +121,12 @@ _MANDATORY_CLAUSE_ALIASES: dict[str, tuple[str, ...]] = {
         "ai use restrictions",
         "ai restrictions",
         "ai use",
+        "ai and data use",
         "ai data use",
         "ai/data use",
         "artificial intelligence",
         "model training",
+        "train general-purpose",
         "training prohibitions",
         "customer data training",
         "ai generated outputs",
@@ -131,8 +138,9 @@ _MANDATORY_CLAUSE_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 def _clause_id_variants(clause: dict[str, Any]) -> set[str]:
+    """Normalize identity labels only — never summaries (avoids 'fees' inside liability notes)."""
     variants: set[str] = set()
-    for key in ("id", "clauseId", "clause_id", "name", "title", "summary", "evidence", "text"):
+    for key in ("id", "clauseId", "clause_id", "name", "title"):
         raw = clause.get(key)
         if raw is None:
             continue
@@ -151,12 +159,13 @@ def _clause_matches_required_id(clause: dict[str, Any], required_id: str) -> boo
     if variants & aliases:
         return True
 
-    # Allow phrase-level matches after normalization, e.g.
-    # "Liability cap, indemnification..." -> liability_cap.
+    # Phrase-level match on labels only. Skip short single-token aliases so
+    # "fees" inside unrelated names cannot satisfy the pricing gate.
     return any(
-        alias and (alias in variant or variant in alias)
+        alias
+        and ("_" in alias or len(alias) >= 10)
+        and any(alias in variant or variant in alias for variant in variants)
         for alias in aliases
-        for variant in variants
     )
 
 
@@ -177,6 +186,9 @@ def _output_text_matches_clause(output_text: str, required_id: str) -> bool:
         return False
     for alias in _MANDATORY_CLAUSE_ALIASES.get(required_id, (required_id,)):
         phrase = (alias or "").replace("_", " ").strip().lower()
+        # Skip ultra-broad aliases in free-text report matching.
+        if phrase in {"third party", "third-party"}:
+            continue
         if phrase and phrase in text:
             return True
     return False
@@ -189,6 +201,8 @@ def _top_level_clause_present(analysis: dict[str, Any], required_id: str) -> boo
         "termination": ("termination",),
         "pricing": ("pricingEscalation",),
         "ai_use_restrictions": ("aiDataUseLanguage",),
+        "subprocessors": ("subprocessors", "subprocessorControls", "subprocessorLanguage"),
+        "data_protection": ("dataProtection", "dataPrivacy"),
     }
     for field in field_map.get(required_id, ()):
         value = analysis.get(field)
@@ -197,6 +211,63 @@ def _top_level_clause_present(analysis: dict[str, Any], required_id: str) -> boo
         if isinstance(value, str) and value.strip():
             return True
         if value and not isinstance(value, str):
+            return True
+    return False
+
+
+def _clause_marked_present(clause: dict[str, Any]) -> bool:
+    """Respect analyzer present=false; missing present defaults to true when named."""
+    if "present" not in clause:
+        return True
+    value = clause.get("present")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1", "present"}
+    return bool(value)
+
+
+def _evidence_corpus(ctx: ProcurementCheckContext, analysis: dict[str, Any]) -> str:
+    """
+    Retrieved contract evidence only.
+
+    Do not dump analyzer JSON here — names like "Termination" with present=false
+    would falsely satisfy evidence matching.
+    """
+    _ = analysis
+    parts: list[str] = []
+    for trace in ctx.source_traces or []:
+        if not isinstance(trace, dict):
+            continue
+        for key in (
+            "preview",
+            "text",
+            "snippet",
+            "content",
+            "sourceName",
+            "source",
+            "documentName",
+        ):
+            raw = trace.get(key)
+            if raw:
+                parts.append(str(raw))
+        meta = trace.get("metadata")
+        if isinstance(meta, dict):
+            for key in ("preview", "text", "title", "file", "source"):
+                raw = meta.get(key)
+                if raw:
+                    parts.append(str(raw))
+    return "\n".join(parts).lower()
+
+
+def _evidence_matches_clause(corpus: str, required_id: str) -> bool:
+    if not corpus:
+        return False
+    for alias in _MANDATORY_CLAUSE_ALIASES.get(required_id, (required_id,)):
+        phrase = (alias or "").replace("_", " ").strip().lower()
+        if phrase in {"third party", "third-party", "fees", "privacy", "scc"}:
+            continue
+        if phrase and phrase in corpus:
             return True
     return False
 
@@ -245,19 +316,11 @@ def check_mandatory_clause(
         tool_executions=ctx.tool_executions,
         tool_events=ctx.tool_events,
     )
+    # When the model skips contract-analyzer (common with strong RAG), still
+    # score required clauses from retrieved evidence and the final report.
+    analyzer_missing = analysis is None
     if analysis is None:
-        return ProcurementCheckResult(
-            passed=False,
-            message=_format_failure(
-                checker,
-                expected,
-                "no contract-analyzer tool output",
-                "Run contract-analyzer before validation.",
-            ),
-            checker=checker,
-            expected=expected,
-            found=None,
-        )
+        analysis = {}
 
     clauses = [c for c in (analysis.get("clauses") or []) if isinstance(c, dict)]
     logger.debug(
@@ -266,20 +329,31 @@ def check_mandatory_clause(
         [k for k in ("liabilityCap", "termination", "pricingEscalation", "aiDataUseLanguage") if analysis.get(k)],
     )
     found_by_id: dict[str, dict[str, Any]] = {}
+    evidence_corpus = _evidence_corpus(ctx, analysis)
     for clause_id in required_ids:
         matched = None
         for clause in clauses:
-            if _clause_matches_required_id(clause, clause_id):
-                matched = clause
-                break
+            if not _clause_matches_required_id(clause, clause_id):
+                continue
+            if not _clause_marked_present(clause):
+                continue
+            matched = clause
+            break
         fallback_present = matched is None and _top_level_clause_present(analysis, clause_id)
         output_present = (
             matched is None
             and not fallback_present
             and _output_text_matches_clause(ctx.output_text, clause_id)
         )
+        # Retrieved contract text can override a flaky analyzer present=false.
+        evidence_present = (
+            matched is None
+            and not fallback_present
+            and not output_present
+            and _evidence_matches_clause(evidence_corpus, clause_id)
+        )
         found_by_id[clause_id] = {
-            "present": bool(matched or fallback_present or output_present),
+            "present": bool(matched or fallback_present or output_present or evidence_present),
             "matchedClause": (
                 matched.get("name")
                 or matched.get("title")
@@ -288,6 +362,8 @@ def check_mandatory_clause(
                 if fallback_present
                 else "report output text"
                 if output_present
+                else "retrieved contract evidence"
+                if evidence_present
                 else None
             ),
         }
@@ -298,17 +374,27 @@ def check_mandatory_clause(
         if not state.get("present")
     ]
     if missing:
+        hint = (
+            " Run contract-analyzer before validation."
+            if analyzer_missing
+            else ""
+        )
         return ProcurementCheckResult(
             passed=False,
-            message=_format_failure(checker, expected, found_by_id),
+            message=_format_failure(checker, expected, found_by_id) + hint,
             checker=checker,
             expected=expected,
             found=found_by_id,
         )
 
+    detail = (
+        "Scored from retrieved evidence / report (contract-analyzer was not called)."
+        if analyzer_missing
+        else None
+    )
     return ProcurementCheckResult(
         passed=True,
-        message=_format_success(checker),
+        message=_format_success(checker, detail),
         checker=checker,
         expected=expected,
         found=found_by_id,
@@ -425,6 +511,13 @@ def _normalize_risk_tier(value: Any) -> str | None:
 def _collect_risk_tiers(ctx: ProcurementCheckContext) -> list[str]:
     tiers: list[str] = []
 
+    def _append_from_text(text: str) -> None:
+        for pattern in (_RISK_TIER_RE, _RISK_TIER_PROSE_RE):
+            for match in pattern.finditer(text or ""):
+                tier = _normalize_risk_tier(match.group(1))
+                if tier:
+                    tiers.append(tier)
+
     try:
         parsed_output = json.loads((ctx.output_text or "").strip())
         if isinstance(parsed_output, dict):
@@ -439,22 +532,16 @@ def _collect_risk_tiers(ctx: ProcurementCheckContext) -> list[str]:
     except json.JSONDecodeError:
         pass
 
-    for match in _RISK_TIER_RE.finditer(ctx.output_text or ""):
-        tier = _normalize_risk_tier(match.group(1))
-        if tier:
-            tiers.append(tier)
+    _append_from_text(ctx.output_text or "")
 
     for trace in ctx.source_traces or []:
         if not isinstance(trace, dict):
             continue
         preview = str(trace.get("preview") or "")
-        for match in _RISK_TIER_RE.finditer(preview):
-            tier = _normalize_risk_tier(match.group(1))
-            if tier:
-                tiers.append(tier)
+        _append_from_text(preview)
         metadata = trace.get("metadata")
         if isinstance(metadata, dict):
-            tier = _normalize_risk_tier(metadata.get("riskTier"))
+            tier = _normalize_risk_tier(metadata.get("riskTier") or metadata.get("risk_tier"))
             if tier:
                 tiers.append(tier)
 

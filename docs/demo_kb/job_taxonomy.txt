@@ -1,0 +1,64 @@
+JET INDUSTRIES — PROFESSIONAL SERVICES JOB TAXONOMY
+Version: 2024.1
+Owner: Procurement Operations
+Effective: 2024-01-01
+
+Canonical role and level codes used for rate-card normalization and vendor title mapping.
+
+------------------------------------------------------------------------
+Engineering | L5
+Mapped vendor titles:
+- Cloud Architect
+- Sr Cloud Architect
+- Senior Cloud Architect
+- Cloud Architect L5
+
+Engineering | L4
+Mapped vendor titles:
+- Cloud Architect L4
+- Mid Cloud Architect
+- SRE
+- Site Reliability Engineer
+- SRE L4
+- Site Reliability Eng L4
+- Data Engineer
+- Data Engineer L4
+- DE L4
+- Senior Data Engineer
+
+Engineering | L3
+Mapped vendor titles:
+- SRE L3
+- Junior SRE
+- Site Reliability Engineer L3
+- Data Engineer L3
+- Junior Data Engineer
+- DE L3
+
+Engineering | L5
+Mapped vendor titles:
+- Security Engineer
+- Security Engineer L5
+- Sr Security Engineer
+- Cybersecurity Engineer
+
+------------------------------------------------------------------------
+Project Management | L4
+Mapped vendor titles:
+- Project Manager
+- Project Manager L4
+- Delivery Manager
+- Agile Project Manager
+
+------------------------------------------------------------------------
+Analytics | L3
+Mapped vendor titles:
+- Business Analyst
+- Business Analyst L3
+- BA L3
+- Business Systems Analyst
+
+------------------------------------------------------------------------
+Notes
+- Vendor rate cards must be mapped to the canonical role and level above before benchmark comparison.
+- Titles that do not match this catalog remain unmapped pending taxonomy review.

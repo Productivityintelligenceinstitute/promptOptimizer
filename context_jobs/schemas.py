@@ -31,6 +31,7 @@ class ContextJobBase(BaseModel):
     relationships: Optional[list[dict]] = None
     trusted_sources: Optional[list[dict]] = Field(None, alias="trustedSources")
     chain_config: Optional[dict] = Field(None, alias="chainConfig")
+    linked_child_job_id: Optional[UUID] = Field(None, alias="linkedChildJobId")
 
     version: int = 1
     owner: Optional[str] = None
@@ -76,6 +77,7 @@ class ContextJobUpdate(BaseModel):
     relationships: Optional[list[dict]] = None
     trusted_sources: Optional[list[dict]] = Field(None, alias="trustedSources")
     chain_config: Optional[dict] = Field(None, alias="chainConfig")
+    linked_child_job_id: Optional[UUID] = Field(None, alias="linkedChildJobId")
 
     version: Optional[int] = None
     owner: Optional[str] = None
@@ -97,6 +99,28 @@ class ContextJobOut(ContextJobBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    asset_ids: list[UUID] = Field(default_factory=list, alias="assetIds")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _hydrate_asset_ids(cls, data: Any) -> Any:
+        """Map ORM linked_asset_ids into API assetIds for responses."""
+        if data is None:
+            return data
+
+        if hasattr(data, "__table__"):
+            payload = {col.name: getattr(data, col.name) for col in data.__table__.columns}
+            raw = payload.get("linked_asset_ids") or []
+            payload["asset_ids"] = raw if isinstance(raw, list) else []
+            return payload
+
+        if isinstance(data, dict):
+            if "asset_ids" not in data and "assetIds" not in data:
+                raw = data.get("linked_asset_ids") or data.get("linkedAssetIds") or []
+                return {**data, "asset_ids": raw if isinstance(raw, list) else []}
+            return data
+
+        return data
 
     class Config:
         populate_by_name = True
@@ -140,6 +164,22 @@ class ContextAssetOut(ContextAssetBase):
 
 class JobRunCreate(BaseModel):
     user_request: Optional[str] = Field("", alias="userRequest")
+    parent_run_id: Optional[UUID] = Field(
+        None,
+        alias="parentRunId",
+        description="Optional parent run id when continuing a lifecycle handoff.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class JobPendingHandoffOut(BaseModel):
+    parent_run_id: UUID = Field(..., alias="parentRunId")
+    child_job_id: UUID = Field(..., alias="childJobId")
+    suggested_user_request: str = Field("", alias="suggestedUserRequest")
+    label: Optional[str] = None
+    status: str = "awaiting_handoff"
 
     class Config:
         populate_by_name = True
@@ -409,6 +449,7 @@ class ProcurementAlertOut(BaseModel):
     complexity_tier: str = Field(..., alias="complexityTier")
     lead_months_threshold: int = Field(..., alias="leadMonthsThreshold")
     complexity_tier_defaulted: bool = Field(..., alias="complexityTierDefaulted")
+    description: str | None = None
     alerted_at: datetime = Field(..., alias="alertedAt")
     dismissed: bool
     suggested_job_id: UUID | None = Field(None, alias="suggestedJobId")
@@ -418,17 +459,53 @@ class ProcurementAlertOut(BaseModel):
         from_attributes = True
 
 
+class ProcurementContractRegisterOut(BaseModel):
+    """Result of registering a contract into the caller's Jet managed KB for expiry alerts."""
+
+    contract_document_id: str = Field(..., alias="contractDocumentId")
+    expiry_date: date = Field(..., alias="expiryDate")
+    vendor: str | None = None
+    description: str | None = None
+    complexity_tier: str = Field(..., alias="complexityTier")
+    namespace: str
+    ingestion_status: str = Field(..., alias="ingestionStatus")
+    upserted_count: int = Field(0, alias="upsertedCount")
+    warnings: list[str] = Field(default_factory=list)
+    message: str
+
+    class Config:
+        populate_by_name = True
+
+
 class IngestionDocumentMetadata(BaseModel):
-    """Client-provided ingest metadata: optional document name/title only."""
+    """
+    Client-provided ingest metadata.
+
+    Known procurement fields are first-class. Additional string keys are allowed
+    (extra=\"allow\") so jobs can stamp custom identifiers for trusted-source filters
+    (e.g. contractId, file, vendor). Unknown nested objects are rejected at coerce time.
+    """
 
     name: str | None = None
     document_name: str | None = Field(None, alias="documentName")
     title: str | None = None
+    document_type: str | None = Field(None, alias="documentType")
+    contract_id: str | None = Field(None, alias="contractId")
+    contract_name: str | None = Field(None, alias="contractName")
+    vendor: str | None = None
+    vendor_name: str | None = Field(None, alias="vendorName")
+    vendor_id: str | None = Field(None, alias="vendorId")
+    expiry_date: str | None = Field(None, alias="expiryDate")
+    complexity_tier: str | None = Field(None, alias="complexityTier")
+    description: str | None = None
+    category: str | None = None
+    file: str | None = None
+    source: str | None = None
+    url: str | None = None
 
     class Config:
         populate_by_name = True
-        extra = "forbid"
-
+        extra = "allow"
 
 class IngestionDocument(BaseModel):
     """Single document for ingestion."""
@@ -497,6 +574,36 @@ class AssetImportRequest(BaseModel):
 
 class IdentityMatchRequest(BaseModel):
     query: str
+
+    class Config:
+        populate_by_name = True
+
+
+class ProcurementDemoSetupRequest(BaseModel):
+    template_id: Optional[UUID] = Field(None, alias="templateId")
+    template_name: Optional[str] = Field(None, alias="templateName")
+    enable_chain: bool = Field(False, alias="enableChain")
+
+    class Config:
+        populate_by_name = True
+
+
+class ProcurementDemoIngestionOut(BaseModel):
+    status: str
+    outcome: str
+    upserted_count: int = Field(0, alias="upsertedCount")
+    failed_count: int = Field(0, alias="failedCount")
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    ingested_sources: list[dict[str, Any]] = Field(default_factory=list, alias="ingestedSources")
+
+    class Config:
+        populate_by_name = True
+
+
+class ProcurementDemoSetupOut(BaseModel):
+    job: ContextJobOut
+    ingestion: ProcurementDemoIngestionOut
 
     class Config:
         populate_by_name = True

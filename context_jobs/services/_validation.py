@@ -45,24 +45,11 @@ def validate_llm_key(
     *,
     package_name: Optional[str] = None,
 ) -> None:
-    if package_name == "trial":
-        if llm_key_id is not None:
-            raise ValueError("BYOK keys are not available during trial.")
-        provider_env_keys = {
-            "openai": os.environ.get("OPENAI_API_KEY"),
-            "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
-            "google": os.environ.get("GEMINI_API_KEY"),
-        }
-        if not any(provider_env_keys.values()):
-            raise ValueError("Platform LLM keys are not configured. Contact support.")
-        return
-
-    if package_name == "pro":
-        if not llm_key_id:
-            raise ValueError(
-                "Pro plan requires a BYOK LLM key for this provider. "
-                "Add a key via POST /context-jobs/llm-keys or set llmKeyId on this job."
-            )
+    if package_name == "pro" and not llm_key_id:
+        raise ValueError(
+            "A BYOK LLM key is required for this provider. "
+            "Add a key via POST /context-jobs/llm-keys or set llmKeyId on this job."
+        )
 
     if not llm_key_id:
         provider_env_keys = {
@@ -84,6 +71,11 @@ def validate_llm_key(
     )
     if not row:
         raise ContextJobsNotFoundError("LLM key not found")
+    purpose = getattr(row, "key_purpose", None) or "llm"
+    if purpose not in {"llm", "both"}:
+        raise ValueError(
+            f"Key '{row.key_label}' is an embedding key and cannot be used for LLM execution."
+        )
 
 
 def validate_execution_model_for_key(
@@ -140,25 +132,104 @@ def validate_job_execution_for_plan(
     llm_key_id: Optional[UUID],
     *,
     allow_model_fallback: bool = False,
+    require_key: bool = True,
 ) -> tuple[str, str, Optional[UUID]]:
-    from context_jobs.provider_key_services import resolve_llm_key_id_for_provider
+    from context_jobs.provider_key_services import (
+        get_active_llm_key_for_provider,
+        resolve_llm_key_id_for_provider,
+    )
 
     provider = (execution_provider or "openai").lower().strip()
     key_id = llm_key_id
-    if package_name == "pro":
+    # Pro must BYOK; trial may BYOK but otherwise falls back to Jet's managed keys.
+    must_have_key = require_key and package_name == "pro"
+    if must_have_key:
         key_id = resolve_llm_key_id_for_provider(db, owner, provider, llm_key_id)
+    elif package_name in {"trial", "pro"} and not key_id:
+        row = get_active_llm_key_for_provider(db, owner, provider)
+        if row:
+            key_id = row.id
     provider, model, key_id = normalize_execution_for_plan(
         package_name,
         execution_provider,
         execution_model,
         key_id,
+        require_key=must_have_key,
     )
-    validate_llm_key(db, owner, key_id, package_name=package_name)
-    if package_name == "pro" and key_id:
+    if require_key:
+        validate_llm_key(db, owner, key_id, package_name=package_name)
+    if package_name in {"trial", "pro"} and key_id:
         model = validate_execution_model_for_key(
             db, owner, key_id, execution_model or model, allow_fallback=allow_model_fallback
         )
     return provider, model, key_id
+
+
+def validate_tool_permissions_keys(
+    db: Session,
+    owner: str,
+    tool_permissions: Optional[list] = None,
+) -> None:
+    """
+    Ensure every enabled tool that needs an external provider key has an active BYOK tool key.
+    """
+    from context_jobs.tools import TOOL_IMPLEMENTATIONS
+    from schemas.tool_provider_key_model import ToolProviderKeyModel
+    from schemas.tool_registry_model import ToolRegistryModel
+
+    enabled = [
+        perm
+        for perm in (tool_permissions or [])
+        if isinstance(perm, dict) and perm.get("enabled")
+    ]
+    if not enabled:
+        return
+
+    tool_ids = [
+        str(perm.get("toolId") or perm.get("tool_id") or "").strip()
+        for perm in enabled
+    ]
+    tool_ids = [tool_id for tool_id in tool_ids if tool_id]
+    if not tool_ids:
+        return
+
+    registry_rows = (
+        db.query(ToolRegistryModel)
+        .filter(ToolRegistryModel.id.in_(tool_ids), ToolRegistryModel.enabled.is_(True))
+        .all()
+    )
+    by_id = {row.id: row for row in registry_rows}
+
+    owned_keys = {
+        row.tool_id
+        for row in db.query(ToolProviderKeyModel)
+        .filter(
+            ToolProviderKeyModel.owner == owner,
+            ToolProviderKeyModel.tool_id.in_(tool_ids),
+            ToolProviderKeyModel.status == "active",
+        )
+        .all()
+    }
+
+    missing: list[str] = []
+    for tool_id in tool_ids:
+        registry = by_id.get(tool_id)
+        provider = (getattr(registry, "external_provider", None) or "").strip() if registry else ""
+        impl = TOOL_IMPLEMENTATIONS.get(tool_id)
+        requires_key = bool(provider) or bool(impl and getattr(impl, "requires_external_key", False))
+        if not requires_key:
+            continue
+        if tool_id in owned_keys:
+            continue
+        label = provider or "external provider"
+        missing.append(f"{tool_id} ({label})")
+
+    if missing:
+        raise ValueError(
+            "Missing BYOK tool keys for: "
+            + ", ".join(missing)
+            + ". Add the required tool keys under Context Jobs → Keys before enabling these tools."
+        )
 
 
 def maybe_ensure_jet_managed_namespace(db: Session, job: ContextJobModel) -> None:

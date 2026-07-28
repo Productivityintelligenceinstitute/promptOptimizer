@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,10 @@ def _slug_from_owner(owner: str) -> str:
     return f"jkb-{digest}"
 
 
+def _owner_key(owner: str | None) -> str:
+    return (owner or "current_user").strip() or "current_user"
+
+
 def ensure_managed_namespace(db: Session, owner: str | None) -> str:
     """
     Return the persisted Pinecone namespace for this owner; create mapping on first use.
@@ -25,7 +30,7 @@ def ensure_managed_namespace(db: Session, owner: str | None) -> str:
     Namespaces are logical partitions — no separate Pinecone API call is required to "create"
     them before query; we only persist a stable id per owner.
     """
-    owner_key = (owner or "current_user").strip() or "current_user"
+    owner_key = _owner_key(owner)
     row = (
         db.query(ManagedJetKbNamespaceModel)
         .filter(ManagedJetKbNamespaceModel.owner == owner_key)
@@ -43,3 +48,53 @@ def ensure_managed_namespace(db: Session, owner: str | None) -> str:
     db.commit()
     db.refresh(row)
     return row.namespace
+
+
+def is_demo_kb_seeded(db: Session, owner: str | None) -> bool:
+    """True when this owner already successfully seeded the procurement demo KB bundle."""
+    owner_key = _owner_key(owner)
+    row = (
+        db.query(ManagedJetKbNamespaceModel.demo_kb_seeded_at)
+        .filter(ManagedJetKbNamespaceModel.owner == owner_key)
+        .first()
+    )
+    return bool(row and row[0] is not None)
+
+
+def get_demo_kb_bundle_version(db: Session, owner: str | None) -> int:
+    """Return the last successfully applied demo KB bundle version for this owner."""
+    owner_key = _owner_key(owner)
+    row = (
+        db.query(ManagedJetKbNamespaceModel)
+        .filter(ManagedJetKbNamespaceModel.owner == owner_key)
+        .first()
+    )
+    if not row or row.demo_kb_seeded_at is None:
+        return 0
+    return int(getattr(row, "demo_kb_bundle_version", 0) or 0)
+
+
+def mark_demo_kb_seeded(
+    db: Session,
+    owner: str | None,
+    *,
+    bundle_version: int | None = None,
+) -> None:
+    """Record a successful demo KB seed for this owner's managed namespace."""
+    ensure_managed_namespace(db, owner)
+    owner_key = _owner_key(owner)
+    row = (
+        db.query(ManagedJetKbNamespaceModel)
+        .filter(ManagedJetKbNamespaceModel.owner == owner_key)
+        .first()
+    )
+    if not row:
+        return
+    if row.demo_kb_seeded_at is None:
+        row.demo_kb_seeded_at = datetime.now(timezone.utc)
+    if bundle_version is not None:
+        current = int(getattr(row, "demo_kb_bundle_version", 0) or 0)
+        if bundle_version > current:
+            row.demo_kb_bundle_version = bundle_version
+    db.add(row)
+    db.commit()

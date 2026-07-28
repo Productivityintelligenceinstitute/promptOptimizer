@@ -111,14 +111,13 @@ def ensure_context_jobs_access(db: Session, owner_or_user: Union[str, UUID, User
 
 def assert_byok_llm_keys_allowed(db: Session, owner_or_user: Union[str, UUID, UserModel]) -> str:
     """
-    BYOK LLM key management is pro-only. Trial uses platform keys; essential has no
-    Context Jobs access (blocked earlier by ensure_context_jobs_access).
+    BYOK key management for Context Jobs users (trial + pro).
+    Essential has no Context Jobs access (blocked earlier by ensure_context_jobs_access).
     """
     package_name = ensure_context_jobs_access(db, owner_or_user)
-    if package_name != "pro":
+    if package_name not in {"pro", "trial"}:
         raise ContextJobsAccessError(
-            "BYOK LLM keys are only available on Pro. "
-            "Trial uses platform API keys; Essential does not include Context Jobs."
+            "BYOK keys require an active Context Jobs trial or Pro plan."
         )
     return package_name
 
@@ -137,19 +136,37 @@ def count_runs(db: Session, owner: str) -> int:
 
 
 def assert_can_create_job(db: Session, owner: str, package_name: str) -> None:
+    _ = package_name
     user = _as_user(db, owner)
     try:
         validate_context_jobs_job_create(db, user.id)
     except Exception as exc:
         _map_access_errors(exc)
+    job_limit, _ = permission_limits_for_user(db, user.id)
+    if job_limit is not None:
+        job_count, _ = _usage_counts(db, user, owner)
+        if job_count >= job_limit:
+            raise ContextJobsQuotaError(
+                f"Trial limit reached: {job_limit} context jobs. "
+                "Upgrade to Pro for unlimited jobs."
+            )
 
 
 def assert_can_create_run(db: Session, owner: str, package_name: str) -> None:
+    _ = package_name
     user = _as_user(db, owner)
     try:
         validate_context_jobs_run_create(db, user.id)
     except Exception as exc:
         _map_access_errors(exc)
+    _, run_limit = permission_limits_for_user(db, user.id)
+    if run_limit is not None:
+        _, run_count = _usage_counts(db, user, owner)
+        if run_count >= run_limit:
+            raise ContextJobsQuotaError(
+                f"Trial limit reached: {run_limit} runs. "
+                "Upgrade to Pro for unlimited runs."
+            )
 
 
 def record_job_created(db: Session, owner: str) -> None:
@@ -181,18 +198,29 @@ def trial_provider_catalog() -> list[dict[str, Any]]:
 
 
 def _usage_counts(db: Session, user: UserModel, owner_key: str) -> tuple[int, int]:
+    """
+    Trial banners and canCreate* flags must match what the user sees in Jobs/Runs.
+
+    Lifetime usage logs can under-count when jobs were created without a ledger bump
+    (e.g. linked chain children). Actual resource counts can under-count if rows were
+    deleted after being recorded. Use the max so the UI never looks behind the gate.
+    """
+    actual_jobs = count_jobs(db, owner_key)
+    actual_runs = count_runs(db, owner_key)
+
     job_access = get_permission_access(db, user.id, PERMISSION_CONTEXT_JOBS_JOB)
     run_access = get_permission_access(db, user.id, PERMISSION_CONTEXT_JOBS_RUN)
 
+    job_count = actual_jobs
+    run_count = actual_runs
+
     if job_access and job_access.query_limit is not None:
-        job_count = get_trial_usage_total(db, user.id, job_access.permission_id)
-    else:
-        job_count = count_jobs(db, owner_key)
+        ledger_jobs = get_trial_usage_total(db, user.id, job_access.permission_id)
+        job_count = max(actual_jobs, ledger_jobs)
 
     if run_access and run_access.query_limit is not None:
-        run_count = get_trial_usage_total(db, user.id, run_access.permission_id)
-    else:
-        run_count = count_runs(db, owner_key)
+        ledger_runs = get_trial_usage_total(db, user.id, run_access.permission_id)
+        run_count = max(actual_runs, ledger_runs)
 
     return job_count, run_count
 
@@ -220,6 +248,7 @@ def build_entitlements(
             "message": str(exc),
             "upgradeRequired": "pro",
             "keyMode": None,
+            "canManageKeys": False,
             "limits": None,
             "usage": None,
             "canCreateJob": False,
@@ -235,6 +264,7 @@ def build_entitlements(
             "message": "Context Jobs require a Pro plan. Upgrade to access this feature.",
             "upgradeRequired": "pro",
             "keyMode": None,
+            "canManageKeys": False,
             "limits": None,
             "usage": None,
             "canCreateJob": False,
@@ -260,28 +290,19 @@ def build_entitlements(
         }
     usage = {"jobs": job_count, "runs": run_count}
 
-    if package_name == "trial":
-        return {
-            "userId": str(user.id),
-            "plan": package_name,
-            "contextJobsEnabled": True,
-            "message": None,
-            "upgradeRequired": None,
-            "keyMode": "platform",
-            "limits": limits,
-            "usage": usage,
-            "canCreateJob": can_create_job,
-            "canCreateRun": can_create_run,
-            "providers": trial_provider_catalog(),
-        }
-
     from context_jobs.provider_key_services import list_provider_catalog
 
     providers = [
         {**entry, "selectable": entry.get("hasUserKey", False)}
-        for entry in list_provider_catalog(db, owner_key, package_name="pro")
+        for entry in list_provider_catalog(db, owner_key, package_name=package_name)
         if entry.get("hasUserKey")
     ]
+    # Trial users with no keys yet still need a provider catalog so they can add BYOK keys.
+    if package_name == "trial" and not providers:
+        providers = [
+            {**entry, "selectable": False}
+            for entry in trial_provider_catalog()
+        ]
     return {
         "userId": str(user.id),
         "plan": package_name,
@@ -289,6 +310,7 @@ def build_entitlements(
         "message": None,
         "upgradeRequired": None,
         "keyMode": "byok",
+        "canManageKeys": True,
         "limits": limits,
         "usage": usage,
         "canCreateJob": can_create_job,
@@ -302,6 +324,8 @@ def normalize_execution_for_plan(
     execution_provider: Optional[str],
     execution_model: Optional[str],
     llm_key_id: Optional[UUID],
+    *,
+    require_key: bool = True,
 ) -> tuple[str, str, Optional[UUID]]:
     """
     Apply plan rules to execution fields. Returns (provider, model, llm_key_id).
@@ -313,27 +337,22 @@ def normalize_execution_for_plan(
     if provider not in PROVIDER_REGISTRY:
         raise ValueError(f"Unknown execution provider: {provider}")
 
-    if package_name == "trial":
-        if llm_key_id is not None:
-            raise ValueError("BYOK keys are not available during trial.")
-        allowed_model = TRIAL_MODELS.get(provider)
-        if not allowed_model:
-            raise ValueError(
-                "Trial plan supports openai, google, and anthropic only."
-            )
-        if execution_model and execution_model != allowed_model:
-            raise ValueError(
-                f"Trial plan only supports {allowed_model} for provider '{provider}'."
-            )
-        return provider, allowed_model, None
+    if package_name not in {"trial", "pro"}:
+        raise ContextJobsAccessError("Context Jobs require a Pro plan or active trial.")
 
-    if package_name == "pro":
-        if not llm_key_id:
+    # Trial users without a BYOK key run on Jet's managed keys with the trial model.
+    if package_name == "trial" and not llm_key_id:
+        if provider not in TRIAL_MODELS:
+            provider = "openai"
+        model = TRIAL_MODELS.get(provider) or get_default_model(provider)
+        return provider, model, None
+
+    model = execution_model or get_default_model(provider)
+    if not llm_key_id:
+        if require_key:
             raise ValueError(
-                "Pro plan requires a BYOK LLM key for this provider. "
+                "A BYOK LLM key is required for this provider. "
                 "Add a key via POST /context-jobs/llm-keys or set llmKeyId on this job."
             )
-        model = execution_model or get_default_model(provider)
-        return provider, model, llm_key_id
-
-    raise ContextJobsAccessError("Context Jobs require a Pro plan or active trial.")
+        return provider, model, None
+    return provider, model, llm_key_id

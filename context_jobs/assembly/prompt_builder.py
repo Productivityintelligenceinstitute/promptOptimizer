@@ -30,16 +30,70 @@ def _workflow_tool_guidance(job: ContextJobModel) -> str | None:
     if workflow == "contract_review" and "contract-analyzer" in tools:
         return (
             "## Contract Analysis Tools\n"
+            "You MUST call contract-analyzer before writing the final review — do not skip it "
+            "even when Retrieved Context already looks complete. Validation requires its "
+            "structured output.\n"
             "When calling contract-analyzer with source=text, pass the COMPLETE contract text "
             "from every Retrieved Context block — do not omit sections such as RENEWAL NOTICE. "
             "The gateway will merge full retrieved context automatically, but include all sections "
             "when pasting inline.\n"
-            "For contract URLs use source=url. Call contract-analyzer before writing the final "
-            "review and base your clause assessment on its structured output.\n"
+            "For contract URLs use source=url. Base your clause assessment on the tool's "
+            "structured output plus retrieved evidence.\n"
             "Use vector database retrieved contract text as the source of truth. If a requested "
             "contract fact, clause, price, date, or notice period is not present in Retrieved "
             "Context, write 'Not available in retrieved vector context' instead of guessing or "
-            "substituting web/doc-reader content."
+            "substituting web/doc-reader content.\n"
+            "Decision discipline (Full and Executive packs): state an explicit renew / "
+            "renegotiate / exit recommendation early (Executive Summary or Decision section). "
+            "Calendar reminders alone are not a decision."
+        )
+
+    if workflow == "supplier_assessment":
+        return (
+            "## Supplier Capability Grounding\n"
+            "Use Retrieved Context (vendor profiles / RFP materials) and the User request as the "
+            "source of truth for every material claim in the matrix.\n"
+            "Web search is not available for this workflow — do not rely on public web pages to "
+            "fill capability cells.\n"
+            "Do NOT invent uptime percentages, SLA breach history, data breaches, certifications, "
+            "pricing models, or risk incidents that are not present in retrieved evidence.\n"
+            "If a comparison cell cannot be filled from evidence, write "
+            "'Not available in retrieved vector context' and list it under Evidence Gaps.\n"
+            "Citations must support the exact claim — do not cite a profile and then add "
+            "unsupported details. Prefer documented risk tiers and category tags from profiles "
+            "over narrative guesses.\n"
+            "Evidence Gaps discipline: do NOT list a gap for any field that already appears in "
+            "Retrieved Context body text OR [meta:...] lines (riskTier / spendTier, "
+            "capability/category tags, named certifications, MSA/contract status, annual spend "
+            "figures, renewal complexity, residency or compliance packaging). Gaps are only for "
+            "truly absent facts (for example missing rate card/SOW, missing SLA metrics, or "
+            "certifications when none are stated).\n"
+            "If a profile states certifications are available, that is evidence — do not list "
+            "those certifications as an evidence gap for that supplier.\n"
+            "When [meta:riskTier=...] or 'Risk tier:' appears for a supplier, use that value in "
+            "the matrix / risk posture cells — never write N/A or list risk tier as an evidence gap.\n"
+            "riskPosture scoring: quality score where HIGHER is better (safer). When tiers are "
+            "present, low must outscore medium, and medium must outscore high "
+            "(example map: low→4-5, medium→2-3, high→1). Never treat riskPosture as severity.\n"
+            "Ranking and technical scores must weigh fit to the requested category/use case in "
+            "the User request; incumbent spend or a linked MSA alone does not justify ranking a "
+            "weaker category fit above a stronger one.\n"
+            "Me-too flags must not erase documented differentiators present in Retrieved Context."
+        )
+
+    if workflow == "procurement":
+        return (
+            "## Supplier Onboarding Grounding\n"
+            "Use Retrieved Context supplier packets / vendor profiles and the User request as "
+            "the source of truth for capability, risk tier, and commercial posture.\n"
+            "Prefer supplier-packet / vendor_profile evidence over unrelated contract chunks when "
+            "both appear in retrieval.\n"
+            "Cite material capability, commercial, and risk claims with [source:…] from retrieved "
+            "supplier evidence — at least several citations are required for Full packs.\n"
+            "Preserve documented risk tiers from profiles / [meta:riskTier=...]. If a fact is "
+            "missing, write 'Not available in retrieved vector context' instead of inventing "
+            "certifications, rate cards, or SLA metrics.\n"
+            "Include named approval owners from the User request in the checklist when provided."
         )
 
     if workflow == "analysis" and "spend-analyzer" in tools:

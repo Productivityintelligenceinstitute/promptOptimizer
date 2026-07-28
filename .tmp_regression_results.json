@@ -1,0 +1,194 @@
+[
+  {
+    "name": "Contract Review & Renewal",
+    "kind": "contract",
+    "runId": "281a7cf7-1dc0-4134-af73-2f8dd84c35aa",
+    "runState": "completed",
+    "status": "PASS",
+    "reason": "ok",
+    "details": {
+      "docTypes": [
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract"
+      ],
+      "riskTiers": [],
+      "tools": [
+        "contract-analyzer"
+      ],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 6938
+    }
+  },
+  {
+    "name": "Contract Review & Renewal (Executive)",
+    "kind": "contract",
+    "runId": "98b54c29-2f25-4343-b606-32a49546895a",
+    "runState": "completed",
+    "status": "PASS",
+    "reason": "ok",
+    "details": {
+      "docTypes": [
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract"
+      ],
+      "riskTiers": [],
+      "tools": [
+        "contract-analyzer",
+        "contract-analyzer"
+      ],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 2023
+    }
+  },
+  {
+    "name": "Contract Review & Renewal (Scorecard)",
+    "kind": "contract",
+    "runId": "ae72dab6-3690-48fb-a786-b5c865d66644",
+    "runState": "completed",
+    "status": "FAIL",
+    "reason": "missing_renew_renegotiate_exit",
+    "details": {
+      "docTypes": [
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract",
+        "contract"
+      ],
+      "riskTiers": [],
+      "tools": [
+        "contract-analyzer",
+        "contract-analyzer",
+        "contract-analyzer"
+      ],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 1373
+    }
+  },
+  {
+    "name": "Supplier Capability Matrix",
+    "kind": "capability",
+    "runId": "a83dad79-658e-4f9a-a0b9-6ea9adc2d732",
+    "runState": "completed",
+    "status": "PASS",
+    "reason": "ok",
+    "details": {
+      "docTypes": [
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile"
+      ],
+      "riskTiers": [
+        "medium",
+        "low"
+      ],
+      "tools": [],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 5832
+    }
+  },
+  {
+    "name": "Supplier Capability Matrix (Executive)",
+    "kind": "capability",
+    "runId": "de213855-3f55-4f44-8189-c39dfaeb6977",
+    "runState": "completed",
+    "status": "PASS",
+    "reason": "ok",
+    "details": {
+      "docTypes": [
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile"
+      ],
+      "riskTiers": [
+        "medium",
+        "low"
+      ],
+      "tools": [],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 1859
+    }
+  },
+  {
+    "name": "Supplier Capability Matrix (Scorecard)",
+    "kind": "capability",
+    "runId": "876d23d6-fec5-40f2-a763-7754b4671810",
+    "runState": "completed",
+    "status": "WARN",
+    "reason": "riskPosture_inverted",
+    "details": {
+      "docTypes": [
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile"
+      ],
+      "riskTiers": [
+        "medium",
+        "low"
+      ],
+      "tools": [],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 788,
+      "scorecardRisk": {
+        "nexgen": 2.0,
+        "cloudco": 1.0
+      }
+    }
+  },
+  {
+    "name": "Supplier Onboarding Checklist",
+    "kind": "onboarding",
+    "runId": "62a681fa-7867-485f-af7b-dcb961bf32f0",
+    "runState": "completed",
+    "status": "PASS",
+    "reason": "ok",
+    "details": {
+      "docTypes": [
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile",
+        "vendor_profile"
+      ],
+      "riskTiers": [
+        "medium",
+        "low"
+      ],
+      "tools": [],
+      "validation": {
+        "decision": null,
+        "confidence": null
+      },
+      "contentLen": 3592
+    }
+  }
+]

@@ -51,6 +51,7 @@ def validate_embedding_key(config: dict[str, Any]) -> ValidationCheck:
     """
     provider = (config.get("embedding_provider") or "openai").strip().lower()
     byo_key = config.get("embedding_api_key")
+    key_id = config.get("embedding_llm_key_id") or config.get("embeddingLlmKeyId")
 
     if byo_key and str(byo_key).strip():
         return ValidationCheck(
@@ -58,6 +59,14 @@ def validate_embedding_key(config: dict[str, Any]) -> ValidationCheck:
             passed=True,
             severity="blocking",
             message=f"BYO {provider} embedding key provided.",
+        )
+
+    if key_id and str(key_id).strip():
+        return ValidationCheck(
+            rule="embedding_key_check",
+            passed=True,
+            severity="blocking",
+            message=f"BYOK embedding key id provided for {provider}.",
         )
 
     # Check server platform keys

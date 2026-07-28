@@ -56,8 +56,41 @@ from context_jobs.embeddings import embed_query
 from context_jobs.ingestion.records import ensure_record_ids
 from context_jobs.ingestion.types import UpsertResult
 from context_jobs.retrieval.base import NormalizedMatch
+from context_jobs.retrieval.filter_dialect import to_weaviate_filter
 from core.config import EMBED_MODEL
-from weaviate.classes.config import Configure, DataType, Property, VectorDistances
+from weaviate.classes.config import Configure, DataType, Property, Tokenization, VectorDistances
+
+_SAFE_PROP = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+# Identity / filter keys must use FIELD tokenization so Exact equality works
+# (WORD tokenization would match shared hyphen tokens across FILTER-E2E-A/B).
+_DEFAULT_FILTER_PROPERTIES = (
+    "file",
+    "source",
+    "url",
+    "title",
+    "name",
+    "documentName",
+    "documentType",
+    "contractId",
+    "vendor",
+    "vendorId",
+    "vendorName",
+    "expiryDate",
+    "complexityTier",
+    "category",
+)
+
+
+def _text_property(name: str, *, field_tokenize: bool) -> Property:
+    if field_tokenize:
+        return Property(
+            name=name,
+            data_type=DataType.TEXT,
+            tokenization=Tokenization.FIELD,
+            skip_vectorization=True,
+        )
+    return Property(name=name, data_type=DataType.TEXT)
 
 
 def normalize_weaviate_cluster_url(url: str) -> str:
@@ -187,14 +220,32 @@ class WeaviateAdapter:
             f"Unsupported Weaviate deployment={dep!r}. Use cloud | local | custom | auto."
         )
 
+    def _object_to_match(self, obj: Any, *, score: float) -> NormalizedMatch:
+        props: dict[str, Any] = dict(obj.properties or {})
+        text_val = props.get(self.text_property)
+        preview = (
+            (str(text_val) if text_val is not None else "")
+            or props.get("preview")
+            or props.get("content")
+            or ""
+        )[:600]
+        oid = str(obj.uuid) if getattr(obj, "uuid", None) is not None else "unknown"
+        meta = {k: v for k, v in props.items() if isinstance(k, str)}
+        return NormalizedMatch(
+            id=oid,
+            score=score,
+            text_preview=preview,
+            metadata=meta,
+        )
+
     def search(
         self,
         query_text: str,
         top_k: int = 8,
         filters: dict[str, Any] | None = None,
     ) -> list[NormalizedMatch]:
-        _ = filters
         query_vec = embed_query(query_text, self.config)
+        wfilter = to_weaviate_filter(filters)
         client = self._open_client()
         try:
             coll = client.collections.get(self.collection_name)
@@ -205,6 +256,8 @@ class WeaviateAdapter:
             }
             if self.target_vector:
                 nv_kwargs["target_vector"] = self.target_vector
+            if wfilter is not None:
+                nv_kwargs["filters"] = wfilter
 
             try:
                 resp = coll.query.near_vector(**nv_kwargs)
@@ -226,30 +279,10 @@ class WeaviateAdapter:
 
             out: list[NormalizedMatch] = []
             for obj in resp.objects or []:
-                props: dict[str, Any] = dict(obj.properties or {})
-                text_val = props.get(self.text_property)
-                preview = (
-                    (str(text_val) if text_val is not None else "")
-                    or props.get("preview")
-                    or props.get("content")
-                    or ""
-                )[:600]
-
                 dist = None
                 if obj.metadata is not None:
                     dist = getattr(obj.metadata, "distance", None)
-                score = _distance_to_score(dist)
-
-                oid = str(obj.uuid) if getattr(obj, "uuid", None) is not None else "unknown"
-                meta = {k: v for k, v in props.items() if isinstance(k, str)}
-                out.append(
-                    NormalizedMatch(
-                        id=oid,
-                        score=score,
-                        text_preview=preview,
-                        metadata=meta,
-                    )
-                )
+                out.append(self._object_to_match(obj, score=_distance_to_score(dist)))
             return out
         finally:
             try:
@@ -257,6 +290,27 @@ class WeaviateAdapter:
             except Exception:
                 pass
 
+    def search_by_metadata_filter(
+        self,
+        filters: dict[str, Any],
+        top_k: int = 50,
+    ) -> list[NormalizedMatch]:
+        """Fetch chunks by metadata filter only (no semantic ranking)."""
+        wfilter = to_weaviate_filter(filters)
+        if wfilter is None:
+            return []
+        client = self._open_client()
+        try:
+            coll = client.collections.get(self.collection_name)
+            resp = coll.query.fetch_objects(filters=wfilter, limit=top_k)
+            return [self._object_to_match(obj, score=1.0) for obj in (resp.objects or [])]
+        except Exception as exc:
+            raise ValueError(f"Weaviate metadata filter query failed: {exc}") from exc
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
     def test_connection(self) -> tuple[bool, str]:
         try:
             _ = self.search("test connection", top_k=1)
@@ -321,17 +375,62 @@ class WeaviateAdapter:
                 "manhattan": VectorDistances.MANHATTAN,
             }
             dist_enum = distance_map.get(distance.lower(), VectorDistances.COSINE)
-            client.collections.create(
-                name=self.collection_name,
-                properties=[
-                    Property(name=self.text_property, data_type=DataType.TEXT),
-                    Property(name="preview", data_type=DataType.TEXT),
-                ],
-                vector_config=Configure.Vectors.self_provided(
-                    vector_index_config=Configure.VectorIndex.hnsw(distance_metric=dist_enum)
-                ),
-            )
-            return True, f"Created Weaviate collection '{self.collection_name}' (BYO vectors, {distance})."
+            prop_names: list[str] = []
+            for name in (self.text_property, "preview", *_DEFAULT_FILTER_PROPERTIES):
+                if name and name not in prop_names:
+                    prop_names.append(name)
+            properties = [
+                _text_property(
+                    name,
+                    field_tokenize=name != self.text_property and name != "preview",
+                )
+                for name in prop_names
+            ]
+
+            # Weaviate Cloud sandboxes may only allow hfresh; try allowed indexes in order.
+            index_builders: list[tuple[str, Any]] = []
+            hfresh = getattr(Configure.VectorIndex, "hfresh", None)
+            if callable(hfresh):
+                index_builders.append(("hfresh", hfresh))
+            index_builders.append(("hnsw", Configure.VectorIndex.hnsw))
+            flat = getattr(Configure.VectorIndex, "flat", None)
+            if callable(flat):
+                index_builders.append(("flat", flat))
+
+            last_error: Exception | None = None
+            errors: list[str] = []
+            for index_name, index_fn in index_builders:
+                try:
+                    client.collections.create(
+                        name=self.collection_name,
+                        properties=properties,
+                        vector_config=Configure.Vectors.self_provided(
+                            vector_index_config=index_fn(distance_metric=dist_enum)
+                        ),
+                    )
+                    return True, (
+                        f"Created Weaviate collection '{self.collection_name}' "
+                        f"(BYO vectors, {distance}, index={index_name})."
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    errors.append(f"{index_name}: {exc}")
+                    msg = str(exc).lower()
+                    try:
+                        if client.collections.exists(self.collection_name):
+                            client.collections.delete(self.collection_name)
+                    except Exception:
+                        pass
+                    # Cloud free tier: only one collection — stop retrying other index types.
+                    if "usage_limit" in msg or "collections count limit" in msg:
+                        break
+                    # If this index type is explicitly disallowed, try the next one.
+                    if "config_not_allowed" in msg or "not allowed for vector_index_type" in msg:
+                        continue
+                    continue
+            detail = " | ".join(errors) if errors else str(last_error)
+            return False, f"Failed to create Weaviate collection: {detail}"
+
         except Exception as exc:
             return False, f"Failed to create Weaviate collection: {exc}"
         finally:
@@ -340,15 +439,56 @@ class WeaviateAdapter:
             except Exception:
                 pass
 
+    def _ensure_text_properties(self, coll: Any, property_names: set[str]) -> None:
+        existing: set[str] = set()
+        try:
+            cfg = coll.config.get()
+            for prop in getattr(cfg, "properties", None) or []:
+                name = getattr(prop, "name", None)
+                if isinstance(name, str):
+                    existing.add(name)
+        except Exception:
+            existing = set()
+
+        for name in sorted(property_names):
+            if not name or name in existing or not _SAFE_PROP.match(name):
+                continue
+            try:
+                coll.config.add_property(
+                    _text_property(
+                        name,
+                        field_tokenize=name not in {self.text_property, "preview"},
+                    )
+                )
+                existing.add(name)
+            except Exception:
+                # Property may already exist or collection may disallow mutation; insert will surface errors.
+                continue
+
     def upsert(self, records: list[dict[str, Any]], batch_size: int = 100) -> UpsertResult:
         ensure_record_ids(records)
         client = self._open_client()
         upserted = 0
         try:
             coll = client.collections.get(self.collection_name)
+            needed: set[str] = {self.text_property, "preview", *_DEFAULT_FILTER_PROPERTIES}
+            for rec in records:
+                meta = rec.get("metadata") or {}
+                if isinstance(meta, dict):
+                    for key, value in meta.items():
+                        if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
+                            needed.add(key)
+            self._ensure_text_properties(coll, needed)
+
             for i in range(0, len(records), batch_size):
                 for rec in records[i : i + batch_size]:
                     props = dict(rec.get("metadata") or {})
+                    # Weaviate TEXT props expect strings for filter equality.
+                    for key, value in list(props.items()):
+                        if isinstance(value, (int, float, bool)):
+                            props[key] = str(value)
+                        elif value is not None and not isinstance(value, str):
+                            props.pop(key, None)
                     text_val = props.get("text") or props.get("preview") or ""
                     if text_val and self.text_property not in props:
                         props[self.text_property] = text_val

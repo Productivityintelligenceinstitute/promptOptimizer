@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 from context_jobs.ingestion.ingestion_service import ingest_documents
 from context_jobs.ingestion.types import IngestionResult
+from context_jobs.managed_jet_kb import (
+    get_demo_kb_bundle_version,
+    is_demo_kb_seeded,
+    mark_demo_kb_seeded,
+)
 from context_jobs.procurement_templates_seed import SYSTEM_OWNER
 from context_jobs.services.job_queries import get_job
 from context_jobs.services.jobs import instantiate_template_job
@@ -18,6 +23,13 @@ from schemas.context_jobs_model import ContextJobModel
 DEMO_KB_DIR = Path(__file__).resolve().parent.parent / "docs" / "demo_kb"
 
 DEFAULT_TEMPLATE_NAME = "Contract Review & Renewal"
+
+# Bump when demo_kb_documents() gains files. Already-seeded owners ingest only the delta.
+DEMO_KB_BUNDLE_VERSION = 2
+# Document ids introduced in each bundle version (for delta ingest).
+_DEMO_KB_DELTA_BY_VERSION: dict[int, frozenset[str]] = {
+    2: frozenset({"demo-job-taxonomy"}),
+}
 
 
 def _read_text(filename: str) -> str:
@@ -60,6 +72,16 @@ def demo_kb_documents() -> list[dict[str, Any]]:
                 "documentType": "rate_card",
                 "vendor": "Acme Cloud Services Inc.",
                 "category": "Professional Services",
+            },
+        },
+        {
+            "id": "demo-job-taxonomy",
+            "text": _read_text("job_taxonomy.txt"),
+            "metadata": {
+                "title": "Jet Industries Job Taxonomy",
+                "documentType": "policy",
+                "category": "Procurement",
+                "taxonomyType": "job_taxonomy",
             },
         },
         {
@@ -109,6 +131,28 @@ def find_system_template(
     )
 
 
+def _skipped_demo_ingestion_result() -> IngestionResult:
+    return IngestionResult(
+        status="completed",
+        outcome="skipped_already_present",
+        next_action={"type": "use_result", "label": "Demo KB already available"},
+        upserted_count=0,
+        failed_count=0,
+        warnings=[
+            "Demo knowledge base was already seeded for your workspace; skipped re-ingest. "
+            "The new job still uses the same Jet managed KB."
+        ],
+        ingested_sources=[{"id": doc["id"], "skipped": True} for doc in demo_kb_documents()],
+    )
+
+
+def _delta_document_ids(from_version: int, to_version: int) -> frozenset[str]:
+    ids: set[str] = set()
+    for version in range(from_version + 1, to_version + 1):
+        ids.update(_DEMO_KB_DELTA_BY_VERSION.get(version, frozenset()))
+    return frozenset(ids)
+
+
 def seed_demo_kb_for_job(
     db: Session,
     owner: str,
@@ -116,14 +160,42 @@ def seed_demo_kb_for_job(
     *,
     documents: list[dict[str, Any]] | None = None,
     ingestion_config: dict[str, Any] | None = None,
+    force: bool = False,
 ) -> IngestionResult:
-    """Ingest the demo KB bundle into a user-owned job's configured vector target."""
+    """
+    Ingest the demo KB bundle into a user-owned job's configured vector target.
+
+    For Jet managed KB (shared per owner), skip full re-ingest after a successful seed
+    at the current bundle version. If the bundle version is newer (new demo files),
+    only the delta documents are upserted. Pass force=True to re-seed the full bundle.
+    """
     job = get_job(db, job_id, owner)
     if not job:
         raise ValueError(f"Job {job_id} not found for owner {owner!r}")
-    docs = documents if documents is not None else demo_kb_documents()
-    return ingest_documents(job, docs, db, ingestion_config=ingestion_config)
 
+    docs = documents if documents is not None else demo_kb_documents()
+    uses_shared_jet_kb = (job.retrieval_mode or "jet_kb").strip().lower() == "jet_kb"
+
+    if uses_shared_jet_kb and not force and is_demo_kb_seeded(db, owner):
+        current_version = get_demo_kb_bundle_version(db, owner)
+        if current_version >= DEMO_KB_BUNDLE_VERSION:
+            return _skipped_demo_ingestion_result()
+        delta_ids = _delta_document_ids(current_version, DEMO_KB_BUNDLE_VERSION)
+        docs = [doc for doc in docs if doc.get("id") in delta_ids]
+        if not docs:
+            mark_demo_kb_seeded(db, owner, bundle_version=DEMO_KB_BUNDLE_VERSION)
+            return _skipped_demo_ingestion_result()
+
+    result = ingest_documents(job, docs, db, ingestion_config=ingestion_config)
+
+    if (
+        uses_shared_jet_kb
+        and result.status in {"completed", "completed_with_warnings"}
+        and not result.error
+    ):
+        mark_demo_kb_seeded(db, owner, bundle_version=DEMO_KB_BUNDLE_VERSION)
+
+    return result
 
 def seed_demo_kb_for_owner(
     db: Session,
@@ -133,6 +205,7 @@ def seed_demo_kb_for_owner(
     job_id: UUID | None = None,
     instantiate_if_missing: bool = True,
     ingestion_config: dict[str, Any] | None = None,
+    force: bool = False,
 ) -> tuple[ContextJobModel, IngestionResult]:
     """
     Ingest demo KB into a job owned by ``owner``.
@@ -171,5 +244,6 @@ def seed_demo_kb_for_owner(
         owner,
         job.id,
         ingestion_config=ingestion_config,
+        force=force,
     )
     return job, result

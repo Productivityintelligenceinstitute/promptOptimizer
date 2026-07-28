@@ -1,4 +1,4 @@
-"""Fernet encryption for BYOK API keys at rest."""
+"""Fernet encryption for BYOK API keys and vector connection secrets at rest."""
 
 from __future__ import annotations
 
@@ -12,16 +12,16 @@ class KeyEncryptionError(Exception):
 
 
 def _fernet() -> Fernet:
-    raw = os.environ.get("LLM_KEY_ENCRYPTION_KEY", "").strip()
+    raw = os.environ.get("KEY_ENCRYPTION_KEY", "").strip()
     if not raw:
         raise KeyEncryptionError(
-            "LLM_KEY_ENCRYPTION_KEY is not configured. "
+            "KEY_ENCRYPTION_KEY is not configured. "
             "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
     try:
         return Fernet(raw.encode() if isinstance(raw, str) else raw)
     except Exception as exc:
-        raise KeyEncryptionError("LLM_KEY_ENCRYPTION_KEY is invalid") from exc
+        raise KeyEncryptionError("KEY_ENCRYPTION_KEY is invalid") from exc
 
 
 def encrypt_api_key(plaintext: str) -> str:
@@ -37,6 +37,23 @@ def decrypt_api_key(ciphertext: str) -> str:
         return _fernet().decrypt(ciphertext.encode()).decode()
     except InvalidToken as exc:
         raise KeyEncryptionError("Failed to decrypt API key") from exc
+
+
+def encrypt_payload(plaintext: str) -> str:
+    """Encrypt an arbitrary string payload (e.g. JSON config)."""
+    if plaintext is None:
+        raise KeyEncryptionError("Payload cannot be empty")
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode()
+
+
+def decrypt_payload(ciphertext: str) -> str:
+    """Decrypt an arbitrary string payload encrypted with encrypt_payload."""
+    if not ciphertext:
+        raise KeyEncryptionError("Encrypted payload is empty")
+    try:
+        return _fernet().decrypt(ciphertext.encode()).decode("utf-8")
+    except InvalidToken as exc:
+        raise KeyEncryptionError("Failed to decrypt payload") from exc
 
 
 def mask_key(plaintext: str) -> str:

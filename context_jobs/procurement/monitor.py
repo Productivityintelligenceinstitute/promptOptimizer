@@ -11,9 +11,7 @@ from sqlalchemy.orm import Session
 
 from context_jobs.retrieval.factory import get_retrieval_adapter
 from context_jobs.retrieval.metadata_filters import adapter_supports_metadata_filter
-from context_jobs.retrieval.security import decrypt_config
 from schemas.context_jobs_model import ContextJobModel, ProcurementAlertModel
-from schemas.context_vector_connection_model import ContextVectorConnectionModel
 from schemas.managed_jet_kb_namespace_model import ManagedJetKbNamespaceModel
 
 logger = logging.getLogger(__name__)
@@ -35,6 +33,15 @@ class ContractDocumentRecord:
     complexity_tier: str
     complexity_tier_defaulted: bool
     lead_months_threshold: int
+    description: str | None = None
+
+
+def _description_from_meta(meta: dict[str, Any]) -> str | None:
+    for key in ("description", "contractName", "title", "name"):
+        value = meta.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
 
 
 def _subtract_months(value: date, months: int) -> date:
@@ -151,6 +158,7 @@ def _group_contract_documents(
             complexity_tier=tier,
             complexity_tier_defaulted=defaulted,
             lead_months_threshold=lead_months,
+            description=_description_from_meta(first_meta),
         )
     return grouped
 
@@ -197,38 +205,25 @@ def _iter_managed_namespace_scans(db: Session) -> Iterator[tuple[str, Any]]:
             )
 
 
-def _iter_external_connection_scans(db: Session) -> Iterator[tuple[str, Any]]:
-    connections = (
-        db.query(ContextVectorConnectionModel)
-        .filter(ContextVectorConnectionModel.status == "active")
-        .all()
-    )
-    for conn in connections:
-        provider = (conn.provider or "").lower().strip()
-        if provider != "pinecone":
-            continue
-        try:
-            config = decrypt_config(conn.encrypted_config or {})
-            adapter = get_retrieval_adapter(provider, config)
-            yield conn.owner, adapter
-        except Exception as exc:
-            logger.error(
-                "Failed to initialize external vector adapter for owner %s (connection=%s): %s",
-                conn.owner,
-                conn.id,
-                exc,
-            )
-
-
 def _collect_contract_documents(db: Session) -> list[ContractDocumentRecord]:
+    """
+    Scan each owner's Jet managed KB namespace independently.
+
+    Alerts are keyed by (owner, contract_document_id) so contracts never mix across users.
+    External vector connections are not scanned for the alerts path.
+    """
     merged: dict[tuple[str, str], ContractDocumentRecord] = {}
 
     for owner, adapter in _iter_managed_namespace_scans(db):
         for doc_id, record in _scan_adapter_contracts(adapter, owner=owner).items():
-            merged[(owner, doc_id)] = record
-
-    for owner, adapter in _iter_external_connection_scans(db):
-        for doc_id, record in _scan_adapter_contracts(adapter, owner=owner).items():
+            if record.owner != owner:
+                logger.warning(
+                    "Skipping contract %s: owner mismatch namespace_owner=%s record_owner=%s",
+                    doc_id,
+                    owner,
+                    record.owner,
+                )
+                continue
             merged[(owner, doc_id)] = record
 
     return list(merged.values())
@@ -308,6 +303,7 @@ def run_contract_expiry_monitor(db: Session) -> dict[str, int]:
             complexity_tier=record.complexity_tier,
             lead_months_threshold=record.lead_months_threshold,
             complexity_tier_defaulted=record.complexity_tier_defaulted,
+            description=record.description,
             suggested_job_id=suggested_job_id,
             dismissed=False,
         )

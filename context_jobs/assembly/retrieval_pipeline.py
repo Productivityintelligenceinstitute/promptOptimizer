@@ -31,7 +31,11 @@ from context_jobs.knowledge_sources import (
 from context_jobs.managed_jet_kb import ensure_managed_namespace
 from context_jobs.retrieval.factory import get_retrieval_adapter
 from context_jobs.retrieval.metadata_filters import adapter_supports_metadata_filter
-from context_jobs.retrieval.security import decrypt_config
+from context_jobs.retrieval.security import decrypt_config, hydrate_embedding_credentials
+from context_jobs.retrieval.trusted_sources import (
+    apply_trusted_sources_filter,
+    build_trusted_sources_metadata_filter,
+)
 from context_jobs.vector_connection_services import get_active_connection_for_owner
 from schemas.context_jobs_model import ContextJobModel
 from schemas.context_vector_connection_model import ContextVectorConnectionModel
@@ -56,28 +60,6 @@ def _score_to_strength(score: float | None) -> str:
     if val >= 0.45:
         return "moderate"
     return "weak"
-
-
-def _apply_trusted_sources_filter(
-    matches: list[Any],
-    trusted_sources: list[dict] | None,
-) -> list[Any]:
-    if not trusted_sources:
-        return matches
-    allowed = {
-        (s.get("value") or s.get("name") or "").lower()
-        for s in trusted_sources
-        if isinstance(s, dict)
-    }
-    if not allowed:
-        return matches
-    filtered = []
-    for m in matches:
-        meta = getattr(m, "metadata", None) or {}
-        source_name = (meta.get("file") or meta.get("source") or meta.get("url") or "").lower()
-        if any(a in source_name or source_name in a for a in allowed if a):
-            filtered.append(m)
-    return filtered or matches
 
 
 def _scope_matches(
@@ -127,6 +109,165 @@ def _sort_matches_by_chunk_index(matches: list[Any]) -> list[Any]:
     )
 
 
+def _match_id(match: Any) -> str:
+    return str(getattr(match, "id", "") or "")
+
+
+def _dedupe_matches(matches: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    out: list[Any] = []
+    for match in matches:
+        mid = _match_id(match)
+        if mid and mid in seen:
+            continue
+        if mid:
+            seen.add(mid)
+        out.append(match)
+    return out
+
+
+def _diversify_by_chunk_index(matches: list[Any], limit: int) -> list[Any]:
+    """Keep coverage across the document instead of only the last N chunks."""
+    if limit <= 0 or len(matches) <= limit:
+        return _sort_matches_by_chunk_index(matches)
+    sorted_matches = _sort_matches_by_chunk_index(matches)
+    if limit == 1:
+        return [sorted_matches[0]]
+    n = len(sorted_matches)
+    chosen = sorted({int(round(i * (n - 1) / (limit - 1))) for i in range(limit)})
+    return [sorted_matches[i] for i in chosen]
+
+
+def _trusted_sources_include_policy(trusted_sources: list[dict] | None) -> bool:
+    """True when the job explicitly trusts policy docs via metadata rules."""
+    from context_jobs.retrieval.trusted_sources import normalize_trusted_sources
+
+    for rule in normalize_trusted_sources(trusted_sources):
+        key = str(rule.get("key") or "").strip().lower()
+        value = str(rule.get("value") or "").strip().lower()
+        if key in {"policyid", "policy_id"}:
+            return True
+        if key in {"documenttype", "document_type"} and value == "policy":
+            return True
+    return False
+
+
+def _build_policy_metadata_filter(trusted_sources: list[dict] | None) -> dict[str, Any] | None:
+    """Store filter for policy supplement — never requires contractId."""
+    from context_jobs.retrieval.trusted_sources import normalize_trusted_sources
+
+    clauses: list[dict[str, Any]] = []
+    for rule in normalize_trusted_sources(trusted_sources):
+        key = rule.get("key")
+        if not key or rule.get("op") != "eq":
+            continue
+        key_l = str(key).strip().lower()
+        value = str(rule.get("value") or "").strip()
+        if not value:
+            continue
+        if key_l in {"policyid", "policy_id"}:
+            clauses.append({str(key): {"$eq": value}})
+        elif key_l in {"documenttype", "document_type"} and value.lower() == "policy":
+            clauses.append({str(key): {"$eq": value}})
+    if not clauses:
+        return {"documentType": {"$eq": "policy"}}
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$or": clauses}
+
+
+_CONTRACT_CLAUSE_FILL_QUERY = (
+    "pricing fees escalation payment terms rate card liability cap indemnification "
+    "data protection privacy GDPR personal data AI training machine learning "
+    "subprocessors termination for convenience auto-renewal notice period"
+)
+
+
+def _prefer_document_types(matches: list[Any], document_types: list[str] | None) -> list[Any]:
+    """Keep preferred document types when present; otherwise leave matches unchanged."""
+    preferred = {
+        str(item).strip().lower()
+        for item in (document_types or [])
+        if str(item).strip()
+    }
+    if not preferred or not matches:
+        return matches
+    filtered = []
+    for match in matches:
+        meta = getattr(match, "metadata", None) or {}
+        doc_type = str(meta.get("documentType") or meta.get("document_type") or "").lower()
+        if doc_type in preferred:
+            filtered.append(match)
+    return filtered or matches
+
+
+def _prepare_vendor_profile_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[str, Any]:
+    """
+    Capability comparison and supplier onboarding must retrieve vendor profiles / packets.
+
+    Lifecycle carry-over often mentions MSA contract ids and incumbent vendors; those
+    signals must not force contract-chunk retrieval for these workflows.
+    """
+    hints = dict(retrieval_hints or {})
+    for key in (
+        "contractIds",
+        "contractNames",
+        "expiryDates",
+        "contractRenewal",
+        "vendors",
+        "vendorIds",
+    ):
+        hints.pop(key, None)
+    hints["documentTypes"] = ["vendor_profile"]
+    return hints
+
+
+def _prepare_rate_card_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[str, Any]:
+    """
+    Rate-card / spend analysis: prefer rate_card + taxonomy/policy docs.
+
+    Do not force MSA contract-scope retrieval. Keep real Vendor: names when present.
+    """
+    hints = dict(retrieval_hints or {})
+    for key in ("contractIds", "contractNames", "contractRenewal", "expiryDates"):
+        hints.pop(key, None)
+    generic_ids = {"rate_card", "rate_cards", "card", "cards", "rate", "rates"}
+    vendor_ids = [
+        vid
+        for vid in (hints.get("vendorIds") or [])
+        if str(vid).strip().lower() not in generic_ids
+    ]
+    if vendor_ids:
+        hints["vendorIds"] = vendor_ids
+    else:
+        hints.pop("vendorIds", None)
+    generic_vendors = {
+        "rate card",
+        "rate cards",
+        "card",
+        "cards",
+        "rate",
+        "rates",
+        "job taxonomy",
+        "spend concentration",
+    }
+    vendors = [
+        v
+        for v in (hints.get("vendors") or [])
+        if str(v).strip().lower() not in generic_vendors
+    ]
+    if vendors:
+        hints["vendors"] = vendors
+    else:
+        hints.pop("vendors", None)
+    hints["documentTypes"] = ["rate_card", "policy"]
+    return hints
+
+
+# Backward-compatible alias used by older call sites / tests.
+_prepare_supplier_assessment_hints = _prepare_vendor_profile_workflow_hints
+
+
 def _semantic_vector_search(
     adapter: Any,
     combined_query: str,
@@ -137,15 +278,28 @@ def _semantic_vector_search(
     extra_metadata_filter: dict[str, Any] | None = None,
 ) -> list[Any]:
     search_top_k = top_k
+    trusted_filter = build_trusted_sources_metadata_filter(trusted_sources)
     metadata_filter = combine_metadata_filters(
         build_pinecone_metadata_filter(retrieval_hints),
+        trusted_filter,
         extra_metadata_filter,
     )
-    if retrieval_hints.get("contractIds") or retrieval_hints.get("vendors") or retrieval_hints.get("expiryDates"):
+    scoped_hints = bool(
+        retrieval_hints.get("contractIds")
+        or retrieval_hints.get("vendors")
+        or retrieval_hints.get("expiryDates")
+        or retrieval_hints.get("documentTypes")
+        or trusted_filter
+    )
+    if scoped_hints:
         search_top_k = min(50, max(top_k * 3, top_k))
 
     matches = adapter.search(combined_query, top_k=search_top_k, filters=metadata_filter) or []
-    matches = _apply_trusted_sources_filter(matches, trusted_sources)
+    # Hard store filters can miss when prompt hints are partial (e.g. vendor="Acme"
+    # vs stored vendorName="Acme Cloud Services Inc."). Fall back to unfiltered search.
+    if not matches and metadata_filter:
+        matches = adapter.search(combined_query, top_k=search_top_k, filters=None) or []
+    matches = apply_trusted_sources_filter(matches, trusted_sources, hard=True)
     if retrieval_hints:
         matches = _scope_matches(
             matches,
@@ -156,6 +310,7 @@ def _semantic_vector_search(
                 or retrieval_hints.get("expiryDates")
             ),
         )
+    matches = _prefer_document_types(matches, retrieval_hints.get("documentTypes"))
     return matches[:top_k]
 
 
@@ -170,6 +325,9 @@ def _contract_metadata_search(
     Metadata-only contract chunk retrieval via Pinecone vendorId filter.
 
     Returns (matches, warning) where warning is set when the filter returned zero hits.
+
+    Trusted sources are applied as a post-filter only. ANDing them into the store
+    filter would exclude policy docs (and can over-constrain contract hits).
     """
     metadata_filter = combine_metadata_filters(
         build_contract_vendor_metadata_filter(retrieval_hints),
@@ -183,17 +341,112 @@ def _contract_metadata_search(
         return [], None
 
     matches = search_fn(metadata_filter, top_k=50) or []
-    matches = _apply_trusted_sources_filter(matches, trusted_sources)
+    matches = apply_trusted_sources_filter(matches, trusted_sources, hard=True)
     matches = _sort_matches_by_chunk_index(matches)
     if matches:
         return matches, None
 
     detected_vendor_id = resolve_contract_vendor_id_for_filter(retrieval_hints)
+    contract_ids = retrieval_hints.get("contractIds") or []
+    scope = f"contractId={contract_ids[0]!r}" if contract_ids else f"vendorId={detected_vendor_id!r}"
     warning = (
-        f"CONTRACT_VENDOR_ID_NOT_FOUND_IN_VECTOR_STORE: no chunks matched vendorId={detected_vendor_id!r}; "
+        f"CONTRACT_SCOPE_NOT_FOUND_IN_VECTOR_STORE: no chunks matched {scope}; "
         "fell back to semantic retrieval."
     )
     return [], warning
+
+
+def _policy_supplement_search(
+    adapter: Any,
+    trusted_sources: list[dict] | None,
+    *,
+    top_k: int = 12,
+    extra_metadata_filter: dict[str, Any] | None = None,
+) -> list[Any]:
+    """
+    Fetch policy chunks without requiring contractId.
+
+    Only used when the job explicitly trusts policy metadata (so demo-KB jobs that
+    rely on the Policy Placeholder asset are unchanged).
+    """
+    if not _trusted_sources_include_policy(trusted_sources):
+        return []
+
+    metadata_filter = combine_metadata_filters(
+        _build_policy_metadata_filter(trusted_sources),
+        extra_metadata_filter,
+    )
+    if not metadata_filter:
+        return []
+
+    search_fn = getattr(adapter, "search_by_metadata_filter", None)
+    if callable(search_fn):
+        matches = search_fn(metadata_filter, top_k=top_k) or []
+    else:
+        matches = (
+            adapter.search(
+                "procurement policy mandatory clauses renewal liability data protection",
+                top_k=top_k,
+                filters=metadata_filter,
+            )
+            or []
+        )
+    matches = apply_trusted_sources_filter(matches, trusted_sources, hard=True)
+    return _sort_matches_by_chunk_index(matches)
+
+
+def _contract_clause_fill_search(
+    adapter: Any,
+    retrieval_hints: dict[str, Any],
+    trusted_sources: list[dict] | None,
+    *,
+    top_k: int = 16,
+    extra_metadata_filter: dict[str, Any] | None = None,
+) -> list[Any]:
+    """
+    Semantic fill for clause-heavy sections (pricing, data, AI, liability, term)
+    scoped to the same contractId / vendorId as the metadata search.
+    """
+    contract_filter = build_contract_vendor_metadata_filter(retrieval_hints)
+    if not contract_filter:
+        return []
+    metadata_filter = combine_metadata_filters(contract_filter, extra_metadata_filter)
+    matches = (
+        adapter.search(
+            _CONTRACT_CLAUSE_FILL_QUERY,
+            top_k=top_k,
+            filters=metadata_filter,
+        )
+        or []
+    )
+    matches = apply_trusted_sources_filter(matches, trusted_sources, hard=True)
+    return matches
+
+
+def _merge_contract_review_matches(
+    contract_matches: list[Any],
+    policy_matches: list[Any],
+    fill_matches: list[Any],
+    *,
+    limit: int,
+) -> list[Any]:
+    """
+    Merge contract + policy + clause-fill hits.
+
+    Policy chunks are kept first (usually few). Contract/fill chunks are diversified
+    by chunk index so early sections (pricing/data/AI) are not dropped.
+    """
+    policy = _dedupe_matches(policy_matches)
+    contract_pool = _dedupe_matches([*contract_matches, *fill_matches])
+    # Drop anything already kept as policy.
+    policy_ids = {_match_id(m) for m in policy if _match_id(m)}
+    contract_pool = [m for m in contract_pool if _match_id(m) not in policy_ids]
+
+    policy_budget = min(len(policy), max(2, min(8, limit // 3 if limit >= 6 else limit)))
+    selected_policy = policy[:policy_budget]
+    remaining = max(0, limit - len(selected_policy))
+    selected_contract = _diversify_by_chunk_index(contract_pool, remaining)
+    return _dedupe_matches([*selected_contract, *selected_policy])
 
 
 def execute_retrieval(
@@ -212,12 +465,24 @@ def execute_retrieval(
             top_k = 8
     top_k = max(1, min(50, top_k))
 
+    workflow = (job.workflow_type or "").lower()
     combined_query = f"{job.goal or ''}\n\n{user_request or ''}".strip() or "general request"
     if retrieval_hints is None:
         retrieval_hints = extract_retrieval_hints(combined_query)
-    if (job.workflow_type or "").lower() in {"contract_review", "analysis", "procurement"}:
+    if workflow == "contract_review":
         retrieval_hints.setdefault("contractRenewal", True)
-    preview_limit = 1200 if (job.workflow_type or "").lower() in {"analysis", "contract_review"} else 600
+    if workflow in {"supplier_assessment", "procurement"}:
+        retrieval_hints = _prepare_vendor_profile_workflow_hints(retrieval_hints)
+        # Profiles are short; pull enough chunks for multi-supplier / packet coverage.
+        top_k = max(top_k, 12)
+    if workflow == "analysis":
+        retrieval_hints = _prepare_rate_card_workflow_hints(retrieval_hints)
+        top_k = max(top_k, 16)
+    preview_limit = (
+        1200
+        if workflow in {"analysis", "contract_review", "supplier_assessment", "procurement"}
+        else 600
+    )
     if isinstance(retrieval_config, dict) and retrieval_config.get("queryRewriting"):
         try:
             import os
@@ -260,7 +525,11 @@ def execute_retrieval(
         if not job.vector_connection_id:
             raise ValueError("Job retrieval_mode is external but vector_connection_id is not set.")
         vector_conn = get_active_connection_for_owner(db, job.vector_connection_id, job.owner)
-        conn_config = decrypt_config(vector_conn.encrypted_config or {})
+        conn_config = hydrate_embedding_credentials(
+            decrypt_config(vector_conn.encrypted_config or {}),
+            db=db,
+            owner=job.owner,
+        )
         adapter = get_retrieval_adapter(vector_conn.provider, conn_config)
     else:
         namespace = ensure_managed_namespace(db, job.owner)
@@ -290,7 +559,8 @@ def execute_retrieval(
         or retrieval_hints.get("contractNames")
         or retrieval_hints.get("contractIds")
     )
-    if has_contract_scope:
+    # Capability / onboarding / rate-card must not use MSA contract-scope retrieval.
+    if has_contract_scope and workflow not in {"supplier_assessment", "procurement", "analysis"}:
         matches, metadata_filter_warning = _contract_metadata_search(
             adapter,
             retrieval_hints,
@@ -298,6 +568,29 @@ def execute_retrieval(
             extra_metadata_filter=vendor_metadata_filter,
         )
         used_metadata_filter = bool(matches)
+        if used_metadata_filter and workflow == "contract_review":
+            # Supplement with trusted policy docs (no contractId required) and a
+            # clause-topic semantic fill under the same contract scope. Demo-KB
+            # jobs without policy trusted-source rules skip the policy supplement.
+            policy_matches = _policy_supplement_search(
+                adapter,
+                job.trusted_sources,
+                top_k=min(12, max(top_k, 8)),
+                extra_metadata_filter=vendor_metadata_filter,
+            )
+            fill_matches = _contract_clause_fill_search(
+                adapter,
+                retrieval_hints,
+                job.trusted_sources,
+                top_k=min(16, max(top_k, 12)),
+                extra_metadata_filter=vendor_metadata_filter,
+            )
+            matches = _merge_contract_review_matches(
+                matches,
+                policy_matches,
+                fill_matches,
+                limit=max(top_k, 24),
+            )
 
     if not used_metadata_filter:
         matches = _semantic_vector_search(
@@ -308,6 +601,11 @@ def execute_retrieval(
             job.trusted_sources,
             extra_metadata_filter=vendor_metadata_filter,
         )
+        if workflow in {"supplier_assessment", "procurement", "analysis"}:
+            matches = _prefer_document_types(
+                matches,
+                retrieval_hints.get("documentTypes"),
+            )
 
     hybrid = bool(isinstance(retrieval_config, dict) and retrieval_config.get("hybridRetrieval"))
     inline_rag, inline_events, inline_traces = retrieve_from_knowledge_sources(
@@ -406,7 +704,8 @@ def execute_retrieval(
                 "freshnessStatus": "current",
                 "warnings": ["WEAK_EVIDENCE"] if evidence_strength == "weak" else [],
                 "evidenceStrength": evidence_strength,
-                "metadata": trace_meta,
+                "preview": preview,
+                "metadata": {**trace_meta, "preview": preview},
             }
         )
 

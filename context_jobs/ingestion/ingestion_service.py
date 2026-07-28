@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -62,6 +63,40 @@ from context_jobs.ingestion.validation import (
 from schemas.context_jobs_model import ContextJobModel
 
 
+_SAFE_META_KEY = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+_KNOWN_META_KEYS = frozenset(
+    {
+        "name",
+        "title",
+        "documentName",
+        "document_name",
+        "documentType",
+        "document_type",
+        "contractId",
+        "contract_id",
+        "contractName",
+        "vendor",
+        "vendorName",
+        "vendor_name",
+        "vendorId",
+        "vendor_id",
+        "expiryDate",
+        "expiry_date",
+        "complexityTier",
+        "complexity_tier",
+        "description",
+        "category",
+        "workspace_id",
+        "workspaceId",
+        "file",
+        "source",
+        "url",
+    }
+)
+_MAX_CUSTOM_META_KEYS = 24
+_MAX_META_VALUE_LEN = 512
+
+
 def _coerce_metadata(metadata: Any) -> dict[str, Any] | None:
     if metadata is None:
         return None
@@ -69,15 +104,47 @@ def _coerce_metadata(metadata: Any) -> dict[str, Any] | None:
         return {"name": metadata, "title": metadata}
     if hasattr(metadata, "model_dump"):
         dumped = metadata.model_dump(by_alias=True, exclude_none=True)
-        return dumped if dumped else None
+        return _coerce_metadata(dumped) if dumped else None
     if isinstance(metadata, dict):
+        out: dict[str, Any] = {}
+        custom_count = 0
+        for key, value in metadata.items():
+            if not isinstance(key, str) or value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            if key in _KNOWN_META_KEYS:
+                if isinstance(value, (str, int, float, bool)):
+                    out[key] = value if not isinstance(value, str) else value.strip()
+                continue
+            # Custom keys for trusted-source scoping (stringified scalars only).
+            if not _SAFE_META_KEY.match(key):
+                continue
+            if custom_count >= _MAX_CUSTOM_META_KEYS:
+                continue
+            if isinstance(value, bool):
+                out[key] = "true" if value else "false"
+            elif isinstance(value, (int, float)):
+                out[key] = str(value)[:_MAX_META_VALUE_LEN]
+            elif isinstance(value, str):
+                out[key] = value.strip()[:_MAX_META_VALUE_LEN]
+            else:
+                continue
+            custom_count += 1
+
         doc_name = (
-            metadata.get("name")
-            or metadata.get("documentName")
-            or metadata.get("document_name")
-            or metadata.get("title")
+            out.get("name")
+            or out.get("documentName")
+            or out.get("document_name")
+            or out.get("title")
+            or out.get("file")
         )
-        return {"name": doc_name, "title": doc_name} if doc_name else None
+        if doc_name:
+            out.setdefault("name", doc_name)
+            out.setdefault("title", doc_name)
+            out.setdefault("file", doc_name)
+            out.setdefault("source", doc_name)
+        return out or None
     return None
 
 
@@ -92,13 +159,26 @@ def _normalize_documents(documents: list[Any]) -> list[dict[str, Any]]:
         else:
             d = {"text": str(item), "metadata": None, "id": None}
 
-        doc_id = d.get("id")
+        # Paste ingest often omits id. Using doc_0 for every paste causes later
+        # ingestions (e.g. policy after contract) to overwrite earlier vectors
+        # that share the same deterministic point ids (doc_0-chunk-N).
+        raw_id = d.get("id")
+        doc_id = str(raw_id).strip() if raw_id is not None else ""
+        if not doc_id:
+            doc_id = str(uuid.uuid4())
         text = sanitize_db_text(d.get("text") or "").strip()
         client_meta = sanitize_for_db(_coerce_metadata(d.get("metadata")))
         title_hint = None
         if isinstance(client_meta, dict):
             title_hint = client_meta.get("title") or client_meta.get("name")
-        inferred = infer_document_metadata_from_llm(text, title_hint=title_hint)
+        # Skip LLM when caller already forced the fields alerts/monitor need.
+        forced_ready = bool(
+            isinstance(client_meta, dict)
+            and client_meta.get("documentType")
+            and (client_meta.get("contractId") or client_meta.get("contract_id"))
+            and (client_meta.get("expiryDate") or client_meta.get("expiry_date"))
+        )
+        inferred = {} if forced_ready else infer_document_metadata_from_llm(text, title_hint=title_hint)
         merged_meta = merge_inferred_metadata(client_meta, inferred)
         meta = normalize_document_metadata(
             merged_meta,

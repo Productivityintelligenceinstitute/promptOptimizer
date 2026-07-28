@@ -1,81 +1,25 @@
-version: '3.9'
+name: promptoptimizer
 
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: promptoptimizer_app
-
-    environment:
-      # DATABASE_URL: postgresql://postgres:123456789@host.docker.internal:5432/jetpromptoptimizer
-      DATABASE_URL: postgresql://postgres:1234567890@postgres:5432/jetpromptoptimizer
-
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      PINECONE_API_KEY: ${PINECONE_API_KEY}
-      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME}
-
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      STRIPE_PRICE_ID_ESSENTIAL: ${STRIPE_PRICE_ID_ESSENTIAL}
-      STRIPE_PRICE_ID_PRO: ${STRIPE_PRICE_ID_PRO}
-
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-
-    command: >
-      sh -c "
-      echo 'Waiting 5 seconds for database to stabilize...' &&
-      sleep 5 &&
-      echo 'Creating database tables from models...' &&
-      python -c 'from database.database import create_db_tables; create_db_tables()' &&
-      echo 'Running seed script...' &&
-      python scripts/seed_packages_permissions.py &&
-      echo 'Starting FastAPI...' &&
-      uvicorn main:app --host 0.0.0.0 --port 8000
-      "
-
-    ports:
-      - "${APP_PORT:-8000}:8000"
-
-    volumes:
-      - ./uploaded_kb:/app/uploaded_kb
-      - ./logs:/app/logs
-      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
-
-    networks:
-      - promptoptimizer_network
-
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '1'
-          memory: 1G
-
   postgres:
     image: postgres:16-alpine
     container_name: promptoptimizer_postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1234567890
-      POSTGRES_DB: jetpromptoptimizer
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-jetpromptoptimizer}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-jetpromptoptimizer}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - promptoptimizer_network
     restart: unless-stopped
@@ -87,12 +31,45 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: redis-server --appendonly yes
+    networks:
+      - promptoptimizer_network
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: promptoptimizer_app
+    env_file:
+      - .env
+    environment:
+      # Inside Docker, DB/redis use service hostnames (not localhost).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jetpromptoptimizer}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./uploaded_kb:/app/uploaded_kb
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
     networks:
       - promptoptimizer_network
     restart: unless-stopped

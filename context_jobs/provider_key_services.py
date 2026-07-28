@@ -9,6 +9,12 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from context_jobs.errors import ContextJobsNotFoundError
+from context_jobs.key_purposes import (
+    normalize_key_purpose,
+    providers_for_purpose,
+    purpose_allows_embedding,
+    purpose_allows_llm,
+)
 from context_jobs.provider_key_schemas import LlmKeyCreate, ToolKeyCreate
 from context_jobs.providers.registry import PROVIDER_REGISTRY
 from context_jobs.security.key_encryption import decrypt_api_key, encrypt_api_key, mask_key
@@ -19,6 +25,57 @@ from schemas.tool_registry_model import ToolRegistryModel
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _verify_embedding_key(provider: str, api_key: str) -> None:
+    provider = provider.lower().strip()
+    if provider == "openai":
+        import openai
+
+        client = openai.OpenAI(api_key=api_key)
+        client.embeddings.create(model="text-embedding-3-small", input="ping")
+        return
+    if provider == "google":
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        client.models.embed_content(model="gemini-embedding-001", contents="ping")
+        return
+    if provider == "cohere":
+        import cohere
+
+        client = cohere.Client(api_key=api_key)
+        client.embed(texts=["ping"], model="embed-english-v3.0", input_type="search_query")
+        return
+    if provider == "voyage":
+        import httpx
+
+        response = httpx.post(
+            "https://api.voyageai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": "voyage-3-lite", "input": ["ping"]},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return
+    if provider == "mistral":
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, base_url="https://api.mistral.ai/v1")
+        client.embeddings.create(model="mistral-embed", input="ping")
+        return
+    if provider == "jina":
+        import httpx
+
+        response = httpx.post(
+            "https://api.jina.ai/v1/embeddings",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": "jina-embeddings-v3", "input": ["ping"]},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return
+    raise ValueError(f"Unsupported embedding provider: {provider}")
 
 
 def _verify_llm_key(provider: str, api_key: str) -> None:
@@ -53,6 +110,14 @@ def _verify_llm_key(provider: str, api_key: str) -> None:
     raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
+def _verify_provider_key(provider: str, api_key: str, purpose: str) -> None:
+    purpose = normalize_key_purpose(purpose)
+    if purpose == "embedding":
+        _verify_embedding_key(provider, api_key)
+        return
+    _verify_llm_key(provider, api_key)
+
+
 def _verify_tool_key(tool_id: str, provider: str, api_key: str) -> None:
     tool_id = tool_id.lower().strip()
     provider = provider.lower().strip()
@@ -70,6 +135,7 @@ def list_llm_keys(
     owner: str,
     *,
     provider: Optional[str] = None,
+    purpose: Optional[str] = None,
 ) -> list[LlmProviderKeyModel]:
     query = db.query(LlmProviderKeyModel).filter(
         LlmProviderKeyModel.owner == owner,
@@ -79,7 +145,43 @@ def list_llm_keys(
         query = query.filter(
             LlmProviderKeyModel.provider == provider.lower().strip()
         )
-    return query.order_by(LlmProviderKeyModel.created_at.desc()).all()
+    rows = query.order_by(LlmProviderKeyModel.created_at.desc()).all()
+    if not purpose:
+        return rows
+    purpose = normalize_key_purpose(purpose)
+    filtered: list[LlmProviderKeyModel] = []
+    for row in rows:
+        row_purpose = getattr(row, "key_purpose", None) or "llm"
+        if purpose == "llm" and purpose_allows_llm(row_purpose):
+            filtered.append(row)
+        elif purpose == "embedding" and purpose_allows_embedding(row_purpose):
+            filtered.append(row)
+        elif purpose == "both" and row_purpose == "both":
+            filtered.append(row)
+    return filtered
+
+
+def resolve_embedding_api_key(
+    db: Session,
+    owner: str,
+    key_id: UUID,
+    *,
+    expected_provider: Optional[str] = None,
+) -> str:
+    row = get_llm_key(db, owner, key_id)
+    if not row or row.status != "active":
+        raise ContextJobsNotFoundError("Embedding key not found")
+    purpose = getattr(row, "key_purpose", None) or "llm"
+    if not purpose_allows_embedding(purpose):
+        raise ValueError(
+            f"Key '{row.key_label}' is an LLM key and cannot be used for embeddings."
+        )
+    if expected_provider and row.provider.lower().strip() != expected_provider.lower().strip():
+        raise ValueError(
+            f"Embedding key provider '{row.provider}' does not match "
+            f"selected embedding provider '{expected_provider}'."
+        )
+    return decrypt_api_key(row.encrypted_key)
 
 
 def get_llm_key(db: Session, owner: str, key_id: UUID) -> Optional[LlmProviderKeyModel]:
@@ -105,6 +207,11 @@ def list_models_for_llm_key(db: Session, owner: str, key_id: UUID) -> dict:
             f"LLM key '{row.key_label}' is not active (status: {row.status}). "
             "Verify or replace the key before listing models."
         )
+    purpose = getattr(row, "key_purpose", None) or "llm"
+    if not purpose_allows_llm(purpose):
+        raise ValueError(
+            f"Key '{row.key_label}' is an embedding key and has no chat models."
+        )
 
     api_key = decrypt_api_key(row.encrypted_key)
     models = fetch_chat_models_for_key(
@@ -126,9 +233,9 @@ def get_active_llm_key_for_provider(
     owner: str,
     provider: str,
 ) -> Optional[LlmProviderKeyModel]:
-    """Most recently updated active BYOK key for owner + provider (openai, google, anthropic)."""
+    """Most recently updated active BYOK LLM key for owner + provider."""
     provider = provider.lower().strip()
-    return (
+    rows = (
         db.query(LlmProviderKeyModel)
         .filter(
             LlmProviderKeyModel.owner == owner,
@@ -136,8 +243,12 @@ def get_active_llm_key_for_provider(
             LlmProviderKeyModel.status == "active",
         )
         .order_by(LlmProviderKeyModel.updated_at.desc())
-        .first()
+        .all()
     )
+    for row in rows:
+        if purpose_allows_llm(getattr(row, "key_purpose", None) or "llm"):
+            return row
+    return None
 
 
 def resolve_llm_key_id_for_provider(
@@ -164,8 +275,15 @@ def resolve_llm_key_id_for_provider(
 
 def create_llm_key(db: Session, owner: str, data: LlmKeyCreate) -> LlmProviderKeyModel:
     provider = data.provider.lower().strip()
-    if provider not in PROVIDER_REGISTRY:
-        raise ValueError(f"Unknown provider: {provider}")
+    purpose = normalize_key_purpose(getattr(data, "key_purpose", None) or "llm")
+    allowed_providers = providers_for_purpose(purpose)
+    if provider not in allowed_providers:
+        raise ValueError(
+            f"Provider '{provider}' is not valid for keyPurpose '{purpose}'. "
+            f"Allowed: {sorted(allowed_providers)}"
+        )
+    if purpose in {"llm", "both"} and provider not in PROVIDER_REGISTRY and provider not in {"openai", "google", "anthropic"}:
+        raise ValueError(f"Unknown LLM provider: {provider}")
 
     existing = (
         db.query(LlmProviderKeyModel)
@@ -180,11 +298,12 @@ def create_llm_key(db: Session, owner: str, data: LlmKeyCreate) -> LlmProviderKe
     if existing:
         raise ValueError(f"A key with label '{data.key_label}' already exists for provider '{provider}'")
 
-    _verify_llm_key(provider, data.api_key)
+    _verify_provider_key(provider, data.api_key, purpose)
 
     row = LlmProviderKeyModel(
         owner=owner,
         provider=provider,
+        key_purpose=purpose,
         key_label=data.key_label.strip(),
         encrypted_key=encrypt_api_key(data.api_key),
         key_last_four=mask_key(data.api_key),
@@ -228,7 +347,7 @@ def verify_llm_key(db: Session, owner: str, key_id: UUID) -> LlmProviderKeyModel
         raise ContextJobsNotFoundError("LLM key not found")
     try:
         api_key = decrypt_api_key(row.encrypted_key)
-        _verify_llm_key(row.provider, api_key)
+        _verify_provider_key(row.provider, api_key, getattr(row, "key_purpose", None) or "llm")
         row.last_verified_at = _now()
         row.last_error = None
         row.status = "active"
@@ -273,11 +392,16 @@ def resolve_llm_api_key(
             raise ValueError("User not found. Please create an account first.")
         if package_name is None:
             package_name = ensure_context_jobs_access(db, user)
-        if package_name == "trial":
-            llm_key_id = None
-        elif package_name == "pro" and not llm_key_id:
+        if not llm_key_id:
             provider = (execution_provider or "openai").lower().strip()
-            llm_key_id = resolve_llm_key_id_for_provider(db, owner, provider)
+            if package_name == "pro":
+                # Pro must bring their own key.
+                llm_key_id = resolve_llm_key_id_for_provider(db, owner, provider)
+            elif package_name == "trial":
+                # Trial may BYOK; otherwise fall through to Jet's managed server keys.
+                row = get_active_llm_key_for_provider(db, owner, provider)
+                if row:
+                    llm_key_id = row.id
 
     if not llm_key_id:
         provider = (execution_provider or "").lower().strip()
@@ -299,6 +423,11 @@ def resolve_llm_api_key(
     )
     if not row:
         raise ContextJobsNotFoundError("LLM key not found")
+    purpose = getattr(row, "key_purpose", None) or "llm"
+    if not purpose_allows_llm(purpose):
+        raise ValueError(
+            f"Key '{row.key_label}' is an embedding key and cannot be used for LLM execution."
+        )
     row.usage_count = (row.usage_count or 0) + 1
     row.updated_at = _now()
     db.add(row)

@@ -9,10 +9,12 @@ _EMBEDDING_HELP = (
     "Vector DB settings plus embedding profile for query-time vectors. "
     "embedding_provider: openai | mistral | jina | cohere | voyage | google. "
     "embedding_model: model id for the chosen provider. "
-    "embedding_api_key: required for mistral, jina, cohere, voyage. "
-    "For openai/google: omit or leave empty to use Jet server keys (OPENAI_API_KEY / GOOGLE_API_KEY or GEMINI_API_KEY); "
-    "set to use the customer's key. Jet does not supply platform keys for Cohere, Voyage, Mistral, or Jina. "
-    "embedding_base_url: optional for openai (custom host); required semantics per provider docs. "
+    "embedding_llm_key_id: preferred BYOK embedding key id from /context-jobs/llm-keys "
+    "(purpose=embedding|both), filtered by provider. "
+    "For openai/google: omit key id to use Jet server keys (OPENAI_API_KEY / GOOGLE_API_KEY or GEMINI_API_KEY). "
+    "Other providers require a matching BYOK embedding key. "
+    "embedding_api_key: legacy plaintext key (optional if embedding_llm_key_id is set). "
+    "embedding_base_url: optional for openai (custom host). "
     "embedding_dimensions: optional int for OpenAI only (Matryoshka / reduced dims, e.g. 768 for Weaviate sandbox)."
 )
 

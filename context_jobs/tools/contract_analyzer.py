@@ -243,12 +243,18 @@ Return a single JSON object with exactly these keys:
 - expiryDate: ISO date string or human-readable date, or null
 - renewalNoticeDays: integer days of advance notice required specifically to prevent auto-renewal or to elect non-renewal at term end — NOT termination-for-cause notice, dispute resolution timelines, cure periods, or other general notice clauses; use only the renewal/non-renewal notice period; if no renewal-specific notice period is stated, return null
 - autoRenewal: boolean or null
-- clauses: array of objects with keys name, present (boolean), summary (string), riskLevel ("low"|"medium"|"high"). Set present to true ONLY when substantive governing language exists for that topic (rights, obligations, restrictions, or defined terms that control behavior). Set present to false when the topic appears only as a section heading, placeholder, cross-reference, table of contents entry, or passing mention without governing language — summarize accordingly (e.g. that no substantive clause was found). Apply this rule to every clause in the array, not only AI/data use
+- clauses: array of objects with keys name, present (boolean), summary (string), riskLevel ("low"|"medium"|"high").
+  ALWAYS include one object for EACH of these names (use these exact names):
+  "Liability Cap", "Termination", "Pricing", "Data Protection", "AI Use Restrictions", "Subprocessors".
+  You may include additional clause objects after those six.
+  Set present to true ONLY when substantive governing language exists for that topic (rights, obligations, restrictions, or defined terms that control behavior). Set present to false when the topic appears only as a section heading, placeholder, cross-reference, table of contents entry, or passing mention without governing language — summarize accordingly (e.g. that no substantive clause was found). Apply this rule to every clause in the array, not only AI/data use.
+  For Subprocessors, present=true when the contract requires approval, notice, flow-downs, or equivalent controls for subprocessors / sub-processors / third-party processors.
 - missingClauses: array of important clause names that appear absent (include "Termination" when termination is null, "Pricing and escalation" when pricingEscalation is null, and similar for other null summary fields)
 - aiDataUseLanguage: string summary of substantive AI/data use governing language, or null if none exists (a heading or topic reference without governing language does not count)
 - liabilityCap: string summary of liability cap/limitation language, or null
 - termination: string summary of termination rights, or null
 - pricingEscalation: string summary of pricing/escalation terms, or null
+- subprocessors: string summary of subprocessor / third-party processor controls, or null
 {hint_line}
 
 Contract text:

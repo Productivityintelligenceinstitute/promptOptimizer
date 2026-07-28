@@ -35,6 +35,7 @@ class ContextJobModel(database.Base):
     relationships = Column(JSONB, nullable=True)
     trusted_sources = Column(JSONB, nullable=True)
     chain_config = Column(JSONB, nullable=True)
+    linked_child_job_id = Column(UUID(as_uuid=True), nullable=True)
     version = Column(Integer, nullable=False, default=1)
     owner = Column(String, nullable=True, default="current_user")
     approval_required = Column(Boolean, nullable=False, default=False)
@@ -45,6 +46,7 @@ class ContextJobModel(database.Base):
     max_agent_turns = Column(Integer, nullable=False, default=10)
     execution_mode = Column(String, nullable=False, default="single_agent")
     workspace_id = Column(String, nullable=True)
+    linked_asset_ids = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         TIMESTAMP(timezone=True),
@@ -52,6 +54,14 @@ class ContextJobModel(database.Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    @property
+    def asset_ids(self):
+        """API-facing linked asset ids (persisted in linked_asset_ids)."""
+        raw = self.linked_asset_ids or []
+        if not isinstance(raw, list):
+            return []
+        return [str(item) for item in raw if item is not None and str(item).strip()]
 
 
 class ContextAssetModel(database.Base):
@@ -223,6 +233,7 @@ class ProcurementAlertModel(database.Base):
     complexity_tier = Column(String, nullable=False)
     lead_months_threshold = Column(Integer, nullable=False)
     complexity_tier_defaulted = Column(Boolean, nullable=False, default=False)
+    description = Column(Text, nullable=True)
     alerted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     dismissed = Column(Boolean, nullable=False, default=False, index=True)
     suggested_job_id = Column(UUID(as_uuid=True), nullable=True)

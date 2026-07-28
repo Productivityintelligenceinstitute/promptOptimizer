@@ -18,6 +18,7 @@ class LlmProviderKeyModel(database.Base):
     id = Column(UUID(as_uuid=True), primary_key=True, nullable=False, default=uuid.uuid4)
     owner = Column(String, nullable=False)
     provider = Column(String, nullable=False)
+    key_purpose = Column(String, nullable=False, default="llm")
     key_label = Column(String, nullable=False)
     encrypted_key = Column(Text, nullable=False)
     key_last_four = Column(String(4), nullable=True)

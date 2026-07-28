@@ -13,6 +13,7 @@ class LlmKeyCreate(BaseModel):
     provider: str
     key_label: str = Field(..., alias="keyLabel")
     api_key: str = Field(..., alias="apiKey")
+    key_purpose: str = Field("llm", alias="keyPurpose")
 
     class Config:
         populate_by_name = True
@@ -21,6 +22,7 @@ class LlmKeyCreate(BaseModel):
 class LlmKeyOut(BaseModel):
     id: UUID
     provider: str
+    key_purpose: str = Field("llm", alias="keyPurpose")
     key_label: str = Field(..., alias="keyLabel")
     key_last_four: Optional[str] = Field(None, alias="keyLastFour")
     is_platform_key: bool = Field(False, alias="isPlatformKey")
@@ -127,6 +129,7 @@ class ContextJobsEntitlementsOut(BaseModel):
     message: Optional[str] = None
     upgrade_required: Optional[str] = Field(None, alias="upgradeRequired")
     key_mode: Optional[str] = Field(None, alias="keyMode")
+    can_manage_keys: bool = Field(False, alias="canManageKeys")
     limits: Optional[EntitlementsLimits] = None
     usage: Optional[EntitlementsUsage] = None
     can_create_job: bool = Field(..., alias="canCreateJob")

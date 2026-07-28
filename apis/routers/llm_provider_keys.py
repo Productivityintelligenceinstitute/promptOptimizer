@@ -30,11 +30,11 @@ from database import database
 provider_keys_router = APIRouter(prefix="/context-jobs")
 
 
-def _require_pro_byok_keys(
+def _require_byok_keys(
     owner: str = Depends(get_context_jobs_owner_with_access),
     db: Session = Depends(database.get_db),
 ) -> str:
-    """Pro-only BYOK key routes (trial uses platform keys; essential blocked upstream)."""
+    """BYOK key routes for trial + pro Context Jobs users."""
     try:
         assert_byok_llm_keys_allowed(db, owner)
     except Exception as exc:
@@ -42,19 +42,23 @@ def _require_pro_byok_keys(
     return owner
 
 
+_require_pro_byok_keys = _require_byok_keys
+
+
 @provider_keys_router.get("/llm-keys", response_model=list[LlmKeyOut], tags=["Context Jobs"])
 async def list_llm_keys(
     provider: str | None = None,
+    purpose: str | None = None,
     owner: str = Depends(_require_pro_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     """
     List BYOK keys for the authenticated user, newest first.
 
-    Optional `provider` query filters to one provider (openai, google, anthropic).
-    Use after the user picks a provider in the job editor; default selection = first row (latest).
+    Optional `provider` query filters to one provider.
+    Optional `purpose` query filters to llm | embedding | both usage.
     """
-    return key_services.list_llm_keys(db, owner, provider=provider)
+    return key_services.list_llm_keys(db, owner, provider=provider, purpose=purpose)
 
 
 @provider_keys_router.get(
