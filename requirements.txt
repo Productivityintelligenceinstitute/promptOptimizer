@@ -3,7 +3,7 @@ langchain_openai
 langchain_core
 langchain_community
 langgraph
-fastapi[standard]
+fastapi[standard]>=0.115.0,<0.130.0
 requests
 sqlalchemy
 psycopg2-binary
@@ -11,7 +11,7 @@ dotenv
 pwdlib[argon2]
 pypdf
 python-docx
-fastapi-pagination
+fastapi-pagination>=0.15.0
 pinecone
 qdrant-client
 weaviate-client>=4.10,<5
