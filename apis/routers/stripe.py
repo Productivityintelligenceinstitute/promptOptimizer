@@ -177,8 +177,8 @@ async def create_checkout_session(
         # Verify price exists and is in the correct mode before creating checkout
         try:
             price_obj = stripe.Price.retrieve(price_id)
-            # Check if price is active
-            if not price_obj.get('active', False):
+            # StripeObject uses attribute access, not dict.get()
+            if not getattr(price_obj, "active", False):
                 logger.warning(f"Price {price_id} is not active")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
