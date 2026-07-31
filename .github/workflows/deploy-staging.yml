@@ -25,7 +25,8 @@ jobs:
             echo "📁 Entering /promptOptimizer"
             cd /promptOptimizer
 
-            # Repo may be owned by root while Actions SSHs as ubuntu
+            # Repo was often created/updated with sudo/root — fix ownership for ubuntu git
+            sudo chown -R ubuntu:ubuntu /promptOptimizer
             git config --global --add safe.directory /promptOptimizer
 
             echo "📥 Fetching and updating stag branch"
