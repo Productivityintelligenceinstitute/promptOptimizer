@@ -1,0 +1,57 @@
+name: Staging Deployment
+
+on:
+  push:
+    branches:
+      - stag
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Staging EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🚀 Deploy to Staging EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.STAG_EC2_HOST }}
+          username: ${{ secrets.STAG_EC2_USERNAME }}
+          key: ${{ secrets.STAG_EC2_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "📁 Entering /promptOptimizer"
+            cd /promptOptimizer
+
+            echo "📥 Fetching and updating stag branch"
+            git fetch origin stag
+            git checkout stag
+            git pull origin stag
+
+            echo "🐳 Rebuilding app container only (postgres/redis untouched)"
+            sudo docker compose up -d --build app
+
+            echo "📊 Container status"
+            sudo docker compose ps
+
+            echo "🩺 Smoke check /docs"
+            curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:8000/docs
+
+            echo "✅ Staging deployment completed successfully"
+
+      - name: ✅ Deployment Summary
+        if: success()
+        run: |
+          echo "🎉 Staging deployment successful"
+          echo "🔗 Commit: ${{ github.sha }}"
+          echo "👤 Deployed by: ${{ github.actor }}"
+          echo "🌿 Branch: stag"
+
+      - name: ❌ Deployment Failed
+        if: failure()
+        run: |
+          echo "💥 Staging deployment failed"
+          echo "Check the SSH step logs above"
+          echo "Do NOT run docker compose down -v on the staging server"
