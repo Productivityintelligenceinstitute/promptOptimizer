@@ -25,6 +25,9 @@ jobs:
             echo "📁 Entering /promptOptimizer"
             cd /promptOptimizer
 
+            # Repo may be owned by root while Actions SSHs as ubuntu
+            git config --global --add safe.directory /promptOptimizer
+
             echo "📥 Fetching and updating stag branch"
             git fetch origin stag
             git checkout stag
