@@ -40,10 +40,21 @@ jobs:
             echo "📊 Container status"
             sudo docker compose ps
 
-            echo "🩺 Smoke check /docs"
-            curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:8000/docs
+            echo "🩺 Waiting for app to become healthy, then smoke check /docs"
+            for i in $(seq 1 30); do
+              if curl -fsS -o /dev/null http://localhost:8000/docs; then
+                echo "Smoke check passed (attempt $i)"
+                curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:8000/docs
+                echo "✅ Staging deployment completed successfully"
+                exit 0
+              fi
+              echo "App not ready yet (attempt $i/30)..."
+              sleep 2
+            done
 
-            echo "✅ Staging deployment completed successfully"
+            echo "❌ App did not become ready in time"
+            sudo docker compose logs app --tail 50
+            exit 1
 
       - name: ✅ Deployment Summary
         if: success()
