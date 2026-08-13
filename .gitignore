@@ -44,6 +44,9 @@ e2e-*.txt
 *output*.txt
 .env.e2e.example
 
+# Local upload size-check fixtures (do not commit)
+test_uploads/
+
 # Local docs and generated docs not required on remote
 *.docx
 *.pdf

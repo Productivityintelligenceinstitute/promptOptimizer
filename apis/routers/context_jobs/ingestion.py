@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 
 from constants.file_types import ALLOWED_EXTS
 from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.clm_connection_schemas import ClmImportRequest, ClmImportResult
 from context_jobs.errors import raise_context_jobs_http
+from context_jobs.services.clm_import import import_clm_contract_into_job
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
@@ -158,6 +160,45 @@ def _extract_text_from_upload(upload: UploadFile, raw: bytes) -> str:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+@router.post(
+    "/jobs/{job_id}/ingest/clm",
+    response_model=ClmImportResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_clm_contract_into_job(
+    job_id: UUID,
+    payload: ClmImportRequest,
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Paste a Coupa / Ironclad contract URL (or resource ID), download the legal
+    agreement via the saved CLM connection, extract text, and ingest into this job.
+    """
+    job = cj_services.get_job(db, job_id, owner)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    try:
+        result = import_clm_contract_into_job(
+            db,
+            owner,
+            job_id=job_id,
+            connection_id=payload.connection_id,
+            url=payload.url,
+            resource_id=payload.resource_id,
+            extra_metadata=payload.metadata,
+        )
+        return ClmImportResult.model_validate(result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise_context_jobs_http(exc)
+        raise
 
 
 @router.post("/jobs/{job_id}/ingest/upload", response_model=dict[str, Any])
