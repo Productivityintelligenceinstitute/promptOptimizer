@@ -1,5 +1,4 @@
 # Virtual environments
-.env
 myenv
 venv
 uploaded_kb
@@ -21,3 +20,5 @@ seed_dummy_test_data.py
 seed_frontend_test_data.py
 TESTING_WITH_SEEDED_DATA.md
 TRIAL_TESTING_GUIDE.md
+config.bat
+node_modules
