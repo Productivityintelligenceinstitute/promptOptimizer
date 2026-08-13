@@ -18,14 +18,14 @@ async def ingest_file(request: Request, file: UploadFile = File(...)):
     if ext not in (TEXT_EXTS | DOC_EXTS | {PDF_EXT}):
         raise HTTPException(400, detail=f"Unsupported file type {ext}")
 
-    max_size = 10 * 1024 * 1024  # 10 MB
+    max_size = 20 * 1024 * 1024  # 20 MB — keep in sync with admin KB UI
     save_path = KB_DIR / file.filename
 
     try:
         contents = await file.read()
         if len(contents) > max_size:
             raise HTTPException(
-                413, detail="File too large. Maximum allowed size is 10MB."
+                413, detail="File too large. Maximum allowed size is 20MB."
             )
 
         with open(save_path, "wb") as out_file:
