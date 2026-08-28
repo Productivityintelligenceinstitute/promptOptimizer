@@ -225,6 +225,10 @@ class JobRunOut(BaseModel):
     pending_memory_changes: Optional[dict] = Field(None, alias="pendingMemoryChanges")
     repair_cycles: Optional[int] = Field(None, alias="repairCycles")
     parent_run_id: Optional[UUID] = Field(None, alias="parentRunId")
+    amendment_run_id: Optional[UUID] = Field(None, alias="amendmentRunId")
+    amendment_state: Optional[str] = Field(None, alias="amendmentState")
+    amendment_validation: Optional[dict] = Field(None, alias="amendmentValidation")
+    amendment_source_status: Optional[str] = Field(None, alias="amendmentSourceStatus")
     workspace_id: Optional[str] = Field(None, alias="workspaceId")
 
     class Config:
@@ -412,9 +416,11 @@ class ContextJobsStatsOut(BaseModel):
 
 class RunArtifactOut(BaseModel):
     path: str
+    filename: Optional[str] = None
     size_bytes: Optional[int] = Field(None, alias="sizeBytes")
     mime_type: Optional[str] = Field(None, alias="mimeType")
     tool_id: Optional[str] = Field(None, alias="toolId")
+    purpose: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -544,6 +550,13 @@ class ToolApprovalRequest(BaseModel):
 
 class MemoryConfirmRequest(BaseModel):
     approved: bool
+
+    class Config:
+        populate_by_name = True
+
+
+class AttachContractRequest(BaseModel):
+    contract_text: str = Field(..., alias="contractText", min_length=50)
 
     class Config:
         populate_by_name = True

@@ -1,13 +1,14 @@
 import mimetypes
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
-from context_jobs.artifacts import merge_rop_and_disk_artifacts, resolve_download_artifact
+from context_jobs.artifacts import merge_rop_and_disk_artifacts, resolve_download_artifact, resolve_download_blob
 from context_jobs.auth import get_context_jobs_owner_with_access
-from context_jobs.errors import raise_context_jobs_http
+from context_jobs.errors import ContextJobsNotFoundError, raise_context_jobs_http
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
@@ -69,7 +70,7 @@ async def list_run_artifacts(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return {
         "runId": run.id,
-        "artifacts": merge_rop_and_disk_artifacts(owner, run),
+        "artifacts": merge_rop_and_disk_artifacts(owner, run, db),
     }
 
 
@@ -84,9 +85,29 @@ async def download_run_artifact(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     try:
-        target = resolve_download_artifact(owner, run, artifact_path)
+        blob = resolve_download_blob(owner, run, artifact_path, db)
+        if blob is not None:
+            filename = blob.filename or artifact_path.split("/")[-1]
+            headers = {
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
+            }
+            return Response(
+                content=bytes(blob.content),
+                media_type=blob.mime_type or "application/octet-stream",
+                headers=headers,
+            )
+        try:
+            target = resolve_download_artifact(owner, run, artifact_path)
+        except ContextJobsNotFoundError:
+            if not run.amendment_run_id:
+                raise
+            child = cj_services.get_run(db, run.amendment_run_id, owner)
+            if not child:
+                raise
+            target = resolve_download_artifact(owner, child, artifact_path)
     except Exception as exc:
         raise_context_jobs_http(exc)
+        raise
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(path=target, filename=target.name, media_type=media_type)
 
@@ -103,6 +124,8 @@ async def record_run_decision(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     if run.state not in {
         "completed",
+        "completed_with_warnings",
+        "needs_human_review",
         "failed",
         "escalated",
         "repair",
@@ -194,6 +217,54 @@ async def confirm_memory_writes(
 ):
     try:
         return cj_services.confirm_run_memory(db, owner, run_id, payload.approved)
+    except Exception as exc:
+        raise_context_jobs_http(exc)
+
+
+@router.post(
+    "/runs/{run_id}/attach-contract",
+    response_model=cj_schemas.JobRunOut,
+)
+async def attach_contract(
+    run_id: UUID,
+    payload: cj_schemas.AttachContractRequest,
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+):
+    run = cj_services.get_run(db, run_id, owner)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    job = cj_services.get_job(db, run.job_id, owner)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    try:
+        cj_services.attach_canonical_contract(
+            db, owner, job.id, payload.contract_text,
+        )
+        return cj_services.get_run(db, run_id, owner)
+    except Exception as exc:
+        raise_context_jobs_http(exc)
+
+
+@router.post(
+    "/runs/{run_id}/retry-amendment",
+    response_model=cj_schemas.JobRunOut,
+)
+async def retry_amendment(
+    run_id: UUID,
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+):
+    try:
+        child = cj_services.retry_amendment_run(db, owner, run_id)
+        if not child:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Could not start amendment. Ensure the original contract is available.",
+            )
+        return cj_services.get_run(db, run_id, owner)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise_context_jobs_http(exc)
 

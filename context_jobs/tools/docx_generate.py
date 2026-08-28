@@ -122,4 +122,13 @@ class DocxGenerateTool(BaseTool):
                     table.rows[ri + 1].cells[ci].text = str(val)
 
         doc.save(str(target))
+        from context_jobs.artifacts.blob_store import persist_run_artifact_file
+
+        persist_run_artifact_file(
+            owner,
+            run_id,
+            path_arg,
+            target,
+            tool_id=self.id,
+        )
         return f"Generated DOCX: {path_arg}. artifact_path={target.as_posix()}"

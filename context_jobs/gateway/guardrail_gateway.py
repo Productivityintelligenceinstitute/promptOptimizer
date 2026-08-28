@@ -34,8 +34,8 @@ from context_jobs.tools import TOOL_IMPLEMENTATIONS, get_tool_implementation
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 from schemas.tool_execution_model import ToolExecutionModel
 
-_WRITE_TOOL_IDS = {"file-write", "docx-generate", DELEGATE_TOOL_ID}
-_RUN_CONTEXT_TOOL_IDS = {"file-write", "docx-generate"}
+_WRITE_TOOL_IDS = {"file-write", "docx-generate", "contract-patch", DELEGATE_TOOL_ID}
+_RUN_CONTEXT_TOOL_IDS = {"file-write", "docx-generate", "contract-patch"}
 GATEWAY_TOOL_ALLOWLIST = frozenset(TOOL_IMPLEMENTATIONS.keys())
 
 
@@ -118,15 +118,21 @@ class GatewayToolExecutor:
                 )
 
         if not should_skip_hitl(tool_call.tool_id, perm):
-            ai_is_risky, ai_reasoning = await assess_tool_risk_with_ai(
-                self.db,
-                tool_id=tool_call.tool_id,
-                tool_name=tool_call.tool_name,
-                arguments=sanitized_args,
-                job=self.job,
-            )
+            workflow = (getattr(self.job, "workflow_type", None) or "").lower()
+            skip_second_gate = workflow == "contract_amendment"
+            ai_is_risky, ai_reasoning = (False, "Amendment follow-up after human approve")
+            if not skip_second_gate:
+                ai_is_risky, ai_reasoning = await assess_tool_risk_with_ai(
+                    self.db,
+                    tool_id=tool_call.tool_id,
+                    tool_name=tool_call.tool_name,
+                    arguments=sanitized_args,
+                    job=self.job,
+                )
 
-            if requires_tool_approval(perm, ai_is_risky, tool_call.tool_id):
+            if not skip_second_gate and requires_tool_approval(
+                perm, ai_is_risky, tool_call.tool_id, job=self.job
+            ):
                 self.approval_state = "pending"
                 cj_audit.write_audit_event(
                     self.db,

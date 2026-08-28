@@ -186,6 +186,32 @@ def seed_demo_kb_for_job(
             mark_demo_kb_seeded(db, owner, bundle_version=DEMO_KB_BUNDLE_VERSION)
             return _skipped_demo_ingestion_result()
 
+    try:
+        from context_jobs.services.canonical_contract import persist_canonical
+
+        for doc in docs:
+            meta = doc.get("metadata") or {}
+            doc_type = str(meta.get("documentType") or "").lower()
+            if doc_type not in {"contract", "msa", "sow", "amendment", "nda"}:
+                continue
+            text = (doc.get("text") or "").strip()
+            if len(text) < 200:
+                continue
+            persist_canonical(
+                db,
+                owner,
+                text,
+                source_doc_id=doc.get("id"),
+                contract_id=meta.get("contractId") or meta.get("contract_id"),
+                job_id=job_id,
+                source_type="demo_kb",
+                metadata=meta if isinstance(meta, dict) else None,
+            )
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("canonical persist skipped for demo KB", exc_info=True)
+
     result = ingest_documents(job, docs, db, ingestion_config=ingestion_config)
 
     if (

@@ -21,10 +21,40 @@ _ANALYSIS_BUDGET = {
     "maxLatencyMs": 300000,
 }
 
+# Full conformed DOCX is one tool-call JSON payload. 4096 output tokens
+# cuts mid-size MSAs (~3k words). Floor is below typical 4o-mini max output.
+AMENDMENT_BUDGET_FLOOR = {
+    "maxTokens": 16384,
+    "maxTotalTokens": 64000,
+    "maxCostUsd": 0.50,
+    "maxToolCalls": 8,
+    "maxLatencyMs": 300000,
+}
+
+
+def merge_amendment_budget(parent: dict | None) -> dict:
+    """Parent budget with amendment floors. Parent wins only when it is higher."""
+    merged = dict(AMENDMENT_BUDGET_FLOOR)
+    for key, value in dict(parent or {}).items():
+        floor = AMENDMENT_BUDGET_FLOOR.get(key)
+        if floor is None:
+            merged[key] = value
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            merged[key] = value
+            continue
+        raised = max(numeric, float(floor))
+        merged[key] = int(raised) if isinstance(floor, int) else raised
+    return merged
+
 
 def resolve_budget_settings(job: ContextJobModel) -> dict:
     """Merge job budget settings with workflow-aware defaults."""
     workflow = (job.workflow_type or "standard").lower()
+    if workflow == "contract_amendment":
+        return merge_amendment_budget(job.budget_settings)
     base = dict(_ANALYSIS_BUDGET if workflow == "analysis" else _DEFAULT_BUDGET)
     user = dict(job.budget_settings or {})
     base.update(user)

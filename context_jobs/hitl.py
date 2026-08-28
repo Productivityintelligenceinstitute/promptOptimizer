@@ -73,7 +73,7 @@ _approval_events: dict[str, threading.Event] = {}
 _approval_results: dict[str, bool] = {}
 _events_lock = threading.Lock()
 
-INHERENT_WRITE_TOOL_IDS = frozenset({"file-write", "docx-generate", "code-exec"})
+INHERENT_WRITE_TOOL_IDS = frozenset({"file-write", "docx-generate", "contract-patch", "code-exec"})
 
 
 def coerce_permission_bool(value: Any) -> bool:
@@ -123,13 +123,18 @@ def requires_tool_approval(
     permission: dict[str, Any],
     ai_risk_assessment: bool,
     tool_id: str,
+    job: ContextJobModel | None = None,
 ) -> bool:
     """
     Determine if a tool call requires human approval.
 
     Inherent write tools always pause for human review when enabled.
     Other tools use AI assessment and optional requireApproval.
+    Contract amendment follow-up runs skip a second HITL gate.
     """
+    workflow = (getattr(job, "workflow_type", None) or "").lower()
+    if workflow == "contract_amendment":
+        return False
     if tool_id in INHERENT_WRITE_TOOL_IDS:
         return True
     if ai_risk_assessment:

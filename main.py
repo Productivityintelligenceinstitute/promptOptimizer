@@ -15,6 +15,7 @@ from apis.routers.library import library_router
 from apis.routers.customer_support_chatbot import customer_support_chatbot_router
 from apis.routers.context_jobs import context_jobs_router
 from apis.routers.context_vector_connections import context_vector_connections_router
+from apis.routers.context_clm_connections import context_clm_connections_router
 from apis.routers.llm_provider_keys import provider_keys_router
 from admin.routes.kb_ingestion import kb_ingestion_router
 
@@ -269,6 +270,7 @@ app.include_router(chat_router, tags=["Chat"])
 app.include_router(library_router, tags=["Library"])
 app.include_router(context_jobs_router, tags=["Context Jobs"])
 app.include_router(context_vector_connections_router, tags=["Context Jobs"])
+app.include_router(context_clm_connections_router, tags=["Context Jobs"])
 app.include_router(provider_keys_router, tags=["Context Jobs"])
 app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"])
 app.include_router(permissioons_router, tags=["Admin - Permission Management"])

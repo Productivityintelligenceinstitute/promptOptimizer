@@ -25,6 +25,7 @@ RESULT_TYPE_MAP = {
     "monitoring": "checklist",
     "procurement": "procurement_output",
     "contract_review": "contract_review",
+    "contract_amendment": "revised_contract",
     "supplier_assessment": "supplier_assessment",
 }
 

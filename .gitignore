@@ -2,6 +2,7 @@
 .env
 myenv
 venv
+.venv/
 uploaded_kb
 data/run-artifacts/
 
@@ -24,6 +25,22 @@ TESTING_WITH_SEEDED_DATA.md
 TRIAL_TESTING_GUIDE.md
 
 # ------------------------------------------------------------
+# Demo contract / policy content (local ingest only — do not publish)
+# ------------------------------------------------------------
+docs/real_world_contracts/
+docs/demo_kb/
+docs/demo_deel_firefly_ingest_pack.md
+
+# Demo-only local runners and fixture prep
+context_jobs/run_demo_msa_*.py
+context_jobs/_resume_demo_msa_compare.py
+context_jobs/prepare_real_world_contracts.py
+context_jobs/seed_demo_clm_connections.py
+
+# Local compare / QA report outputs
+context_jobs/_last_*.txt
+
+# ------------------------------------------------------------
 # Local-only QA/testing artifacts (keep local, don't push)
 # ------------------------------------------------------------
 
@@ -43,6 +60,11 @@ upsert_pdf_to_*.py
 e2e-*.txt
 *output*.txt
 .env.e2e.example
+
+# Local upload size-check fixtures (do not commit)
+test_uploads/
+context_jobs/clm/_last_backend_api_e2e.txt
+context_jobs/clm/_last_live_user_e2e.txt
 
 # Local docs and generated docs not required on remote
 *.docx

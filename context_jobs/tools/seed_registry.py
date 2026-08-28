@@ -43,9 +43,10 @@ def _category_for(tool_id: str) -> str:
         "api-caller": "integrate",
         "file-write": "write",
         "docx-generate": "write",
+        "contract-patch": "write",
     }
     return mapping.get(tool_id, "integrate")
 
 
 def _is_read_only(tool_id: str) -> bool:
-    return tool_id not in {"file-write", "docx-generate", "api-caller"}
+    return tool_id not in {"file-write", "docx-generate", "contract-patch", "api-caller", "code-exec"}

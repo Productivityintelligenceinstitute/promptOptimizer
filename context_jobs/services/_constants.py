@@ -45,7 +45,10 @@ VALID_WORKFLOW_TYPES = frozenset({
     "procurement",
     "contract_review",
     "supplier_assessment",
+    "contract_amendment",
 })
+
+INTERNAL_WORKFLOW_TYPES = frozenset({"contract_amendment"})
 
 
 def normalize_workflow_type(value: str | None, *, default_on_invalid: str | None = None) -> str:
