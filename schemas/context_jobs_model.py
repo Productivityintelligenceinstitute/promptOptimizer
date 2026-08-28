@@ -212,6 +212,7 @@ class JobRunModel(database.Base):
     pending_memory_changes = Column(JSONB, nullable=True)
     repair_cycles = Column(Integer, nullable=False, default=0)
     parent_run_id = Column(UUID(as_uuid=True), nullable=True)
+    amendment_run_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     replay_snapshot = Column(JSONB, nullable=True)
     workspace_id = Column(String, nullable=True)
 

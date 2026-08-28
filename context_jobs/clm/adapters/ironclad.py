@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT_S = 60.0
 DEFAULT_HOST = "na1.ironcladapp.com"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _is_loopback_host(host: str) -> bool:
+    hostname = (host or "").split("%", 1)[0].split(":", 1)[0].strip().strip("[]").lower()
+    return hostname in _LOOPBACK_HOSTS
 
 
 class IroncladAdapter:
@@ -58,6 +64,14 @@ class IroncladAdapter:
     # ------------------------------------------------------------------ helpers
 
     def _api_base(self, config: dict[str, Any], *, host_override: Optional[str] = None) -> str:
+        """
+        Build the Public API root.
+
+        Production hosts stay on https://{region}.ironcladapp.com/public/api/v1.
+        A full http(s) base_url (used by the local CLM mock) keeps its scheme and port.
+        Loopback hosts default to http so localhost mocks work without TLS.
+        """
+        scheme = "https"
         host = (host_override or "").strip().lower()
         if not host:
             raw = (
@@ -66,19 +80,24 @@ class IroncladAdapter:
                 or config.get("host")
                 or DEFAULT_HOST
             ).strip()
-            if raw.startswith("http"):
-                parsed_host = raw.split("://", 1)[1].split("/", 1)[0]
-                host = parsed_host.lower()
+            if raw.startswith("http://"):
+                scheme = "http"
+                host = raw[7:].split("/", 1)[0].lower()
+            elif raw.startswith("https://"):
+                scheme = "https"
+                host = raw[8:].split("/", 1)[0].lower()
             else:
                 host = raw.lower()
         if host.endswith(".com") and "/" in host:
             host = host.split("/", 1)[0]
         if not host:
             host = DEFAULT_HOST
-        # Accept bare region like "na1" or "demo"
-        if "." not in host:
+        # Bare region only (na1 / eu1 / demo) — not localhost:8765 or 127.0.0.1:8765
+        if "." not in host and ":" not in host:
             host = f"{host}.ironcladapp.com"
-        return f"https://{host}/public/api/v1"
+        if _is_loopback_host(host):
+            scheme = "http"
+        return f"{scheme}://{host}/public/api/v1"
 
     def _origin(self, config: dict[str, Any], *, host_override: Optional[str] = None) -> str:
         base = self._api_base(config, host_override=host_override)

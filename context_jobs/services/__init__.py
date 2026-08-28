@@ -23,6 +23,7 @@ from context_jobs.services.jobs import (
 )
 from context_jobs.services.prompt_to_job import generate_job_from_prompt
 from context_jobs.services.runs import (
+    attach_canonical_contract,
     confirm_run_memory,
     create_run,
     export_run_report,
@@ -35,6 +36,7 @@ from context_jobs.services.runs import (
     record_human_decision,
     replay_run,
     resolve_run_tool_approval,
+    retry_amendment_run,
 )
 from context_jobs.services.versioning import (
     archive_job,
@@ -48,6 +50,7 @@ from context_jobs.services.versioning import (
 
 __all__ = [
     "archive_job",
+    "attach_canonical_contract",
     "confirm_run_memory",
     "instantiate_template_job",
     "build_job_config_from_template",
@@ -85,6 +88,7 @@ __all__ = [
     "record_human_decision",
     "replay_run",
     "resolve_run_tool_approval",
+    "retry_amendment_run",
     "rollback_job_version",
     "suggest_job_identity_matches",
     "update_asset",

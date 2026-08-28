@@ -7,6 +7,8 @@ import logging
 from sqlalchemy import inspect, text
 
 from database.database import engine
+from schemas.canonical_contract_model import CanonicalContractModel  # noqa: F401
+from schemas.run_artifact_blob_model import RunArtifactBlobModel  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -187,5 +189,90 @@ def ensure_context_jobs_columns() -> None:
                     text("CREATE INDEX IF NOT EXISTS ix_run_chains_child_run_id ON run_chains (child_run_id)")
                 )
             logger.info("Created run_chains table")
+        _add_column_if_missing(
+            "job_runs",
+            "amendment_run_id",
+            "ALTER TABLE job_runs ADD COLUMN amendment_run_id UUID NULL",
+        )
+        inspector = inspect(engine)
+        if "run_artifact_blobs" not in inspector.get_table_names():
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS run_artifact_blobs (
+                            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                            owner VARCHAR NOT NULL,
+                            run_id UUID NOT NULL,
+                            visible_on_run_id UUID NOT NULL,
+                            path VARCHAR NOT NULL,
+                            filename VARCHAR NOT NULL,
+                            mime_type VARCHAR NOT NULL,
+                            tool_id VARCHAR NULL,
+                            purpose VARCHAR NOT NULL DEFAULT 'artifact',
+                            size_bytes INTEGER NOT NULL,
+                            content BYTEA NOT NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (run_id, path)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_run_artifact_blobs_owner ON run_artifact_blobs (owner)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_run_artifact_blobs_run_id ON run_artifact_blobs (run_id)")
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_run_artifact_blobs_visible_on_run_id "
+                        "ON run_artifact_blobs (visible_on_run_id)"
+                    )
+                )
+            logger.info("Created run_artifact_blobs table")
+        inspector = inspect(engine)
+        if "canonical_contracts" not in inspector.get_table_names():
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS canonical_contracts (
+                            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                            owner VARCHAR NOT NULL,
+                            job_id UUID NULL,
+                            source_doc_id VARCHAR NULL,
+                            contract_id VARCHAR NULL,
+                            text TEXT NOT NULL,
+                            content_hash VARCHAR NOT NULL,
+                            source_type VARCHAR NOT NULL,
+                            metadata JSONB NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            UNIQUE (owner, source_doc_id)
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_canonical_contracts_owner ON canonical_contracts (owner)")
+                )
+                conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_canonical_contracts_job_id ON canonical_contracts (job_id)")
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_canonical_contracts_source_doc_id "
+                        "ON canonical_contracts (source_doc_id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_canonical_contracts_contract_id "
+                        "ON canonical_contracts (contract_id)"
+                    )
+                )
+            logger.info("Created canonical_contracts table")
     except Exception:
         logger.exception("Failed to ensure context_jobs schema columns")

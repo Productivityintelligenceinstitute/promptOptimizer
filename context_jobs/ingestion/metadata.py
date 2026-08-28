@@ -13,6 +13,10 @@ _CONTRACT_ID_RE = re.compile(
     r"\b([A-Z]{2,}(?:-[A-Z0-9]{2,}){2,})\b",
     re.IGNORECASE,
 )
+_POLICY_ID_LABEL_RE = re.compile(
+    r"\bpolicy\s*id\s*[:#]?\s*([A-Z]{2,}(?:-[A-Z0-9]{2,}){2,})",
+    re.IGNORECASE,
+)
 _ISO_DATE_RE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
 _VENDOR_BEFORE_MSA_RE = re.compile(
     r"\b([A-Za-z][A-Za-z0-9&.\- ]{1,40}?)\s+(?:MSA|SOW|NDA|Agreement)\b",
@@ -311,6 +315,8 @@ def _extract_document_name(text: str) -> str | None:
 
 
 def _looks_like_policy(text: str, meta: dict[str, Any]) -> bool:
+    if (_coalesce_str(meta, "documentType", "document_type") or "").lower() == "policy":
+        return True
     sample = " ".join(
         str(part or "")
         for part in (
@@ -417,6 +423,10 @@ def normalize_document_metadata(
 
     if is_policy:
         meta.setdefault("documentType", "policy")
+        if not _coalesce_str(meta, "policyId", "policy_id"):
+            policy_id_match = _POLICY_ID_LABEL_RE.search(text or "")
+            if policy_id_match:
+                meta["policyId"] = policy_id_match.group(1).upper()
     elif _looks_like_contract(text or "", meta):
         meta.setdefault("documentType", "contract")
 

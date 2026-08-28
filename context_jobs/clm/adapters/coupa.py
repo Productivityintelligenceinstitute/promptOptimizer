@@ -75,9 +75,12 @@ class CoupaAdapter:
     ) -> str:
         if host_override:
             host = host_override.strip().lower()
-            if not host.startswith("http"):
-                return f"https://{host}".rstrip("/")
-            return host.rstrip("/")
+            if host.startswith("http"):
+                return host.rstrip("/")
+            hostname = host.split(":", 1)[0].strip("[]")
+            if hostname in {"127.0.0.1", "localhost", "::1"}:
+                return f"http://{host}".rstrip("/")
+            return f"https://{host}".rstrip("/")
 
         raw = (
             config.get("instance_url")

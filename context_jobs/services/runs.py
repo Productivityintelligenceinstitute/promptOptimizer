@@ -22,6 +22,7 @@ from context_jobs.run_workflows import (
     export_run_markdown,
     list_tool_executions,
 )
+from context_jobs.services.amendment import is_contract_review_job, start_amendment_run
 from context_jobs.services.job_queries import get_job
 from context_jobs.workspace import default_workspace_id
 from schemas.context_jobs_model import ContextJobModel, JobRunModel, RunChainModel
@@ -38,6 +39,29 @@ def list_runs(db: Session, owner: str) -> List[JobRunModel]:
     )
 
 
+def hydrate_run_amendment(db: Session, run: JobRunModel) -> JobRunModel:
+    """Attach live amendment child state and validation for API serialization."""
+    amendment_state = None
+    amendment_validation = None
+    amendment_source_status = None
+    if run.amendment_run_id:
+        child = db.query(JobRunModel).filter(JobRunModel.id == run.amendment_run_id).first()
+        if child:
+            amendment_state = child.state
+            child_rop = child.run_output_package if isinstance(child.run_output_package, dict) else {}
+            amendment_validation = child_rop.get("amendmentValidation")
+    rop = run.run_output_package if isinstance(run.run_output_package, dict) else {}
+    amendment_info = rop.get("amendment") if isinstance(rop, dict) else None
+    if isinstance(amendment_info, dict) and amendment_info.get("status") == "source_not_found":
+        amendment_source_status = "not_found"
+    elif run.amendment_run_id:
+        amendment_source_status = "found"
+    run.amendment_state = amendment_state
+    run.amendment_validation = amendment_validation
+    run.amendment_source_status = amendment_source_status
+    return run
+
+
 def get_run(db: Session, run_id: UUID, owner: str) -> Optional[JobRunModel]:
     ensure_context_jobs_access(db, owner)
     run = db.query(JobRunModel).filter(JobRunModel.id == run_id).first()
@@ -46,7 +70,7 @@ def get_run(db: Session, run_id: UUID, owner: str) -> Optional[JobRunModel]:
     job = get_job(db, run.job_id, owner)
     if not job:
         return None
-    return run
+    return hydrate_run_amendment(db, run)
 
 
 def create_run(
@@ -188,19 +212,23 @@ def record_human_decision(
         raise ContextJobsNotFoundError("Run not found")
     if run.human_decision:
         raise ValueError("A decision has already been recorded for this run")
+    decision = str(data.decision or "").strip().lower()
+    job = get_job(db, run.job_id, owner)
+    if not job:
+        raise ContextJobsNotFoundError("Run not found")
+
+    if decision in {"approve", "approved", "accept", "accepted"} and is_contract_review_job(job):
+        start_amendment_run(db, owner, run, job, notes=data.notes)
+        db.refresh(run)
+
     run.human_decision = {
         "decision": data.decision,
         "decidedBy": data.decided_by or owner,
         "decidedAt": datetime.now(timezone.utc).isoformat(),
         "notes": data.notes or "",
+        "amendmentRunId": str(run.amendment_run_id) if run.amendment_run_id else None,
     }
-    job = get_job(db, run.job_id, owner)
-    if job:
-        run = apply_decision_follow_through(db, run, job, data.decision, owner)
-    else:
-        db.add(run)
-        db.commit()
-        db.refresh(run)
+    run = apply_decision_follow_through(db, run, job, data.decision, owner)
     decision = str(data.decision or "").strip().lower()
     if decision in {"approve", "approved", "accept", "accepted"}:
         event_type = "run.approved"
@@ -222,7 +250,7 @@ def record_human_decision(
                 "runState": run.state,
             },
         )
-    return run
+    return hydrate_run_amendment(db, run)
 
 
 def get_queue_status() -> dict:
@@ -359,3 +387,67 @@ def get_run_chain(db: Session, owner: str, run_id: UUID) -> dict[str, Any] | Non
         "parentRun": parent_run,
         "childRuns": _build_child_run_tree(db, owner, run_id),
     }
+
+
+def attach_canonical_contract(
+    db: Session,
+    owner: str,
+    job_id: UUID,
+    text: str,
+    *,
+    source_doc_id: str | None = None,
+    contract_id: str | None = None,
+    source_type: str = "manual_attach",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Manually attach a full-text canonical contract to a job."""
+    from context_jobs.services.canonical_contract import persist_canonical
+
+    job = get_job(db, job_id, owner)
+    if not job:
+        raise ContextJobsNotFoundError("Job not found")
+    row = persist_canonical(
+        db,
+        owner,
+        text,
+        source_doc_id=source_doc_id or f"manual-{job_id}",
+        contract_id=contract_id,
+        job_id=job_id,
+        source_type=source_type,
+        metadata=metadata,
+    )
+    return {
+        "id": str(row.id),
+        "sourceDocId": row.source_doc_id,
+        "contractId": row.contract_id,
+        "contentHash": row.content_hash,
+        "sourceType": row.source_type,
+    }
+
+
+def retry_amendment_run(
+    db: Session,
+    owner: str,
+    parent_run_id: UUID,
+    *,
+    notes: str | None = None,
+) -> JobRunModel | None:
+    """Clear previous amendment and start a fresh one (e.g. after validation failure)."""
+    parent_run = get_run(db, parent_run_id, owner)
+    if not parent_run:
+        raise ContextJobsNotFoundError("Run not found")
+    parent_job = get_job(db, parent_run.job_id, owner)
+    if not parent_job:
+        raise ContextJobsNotFoundError("Job not found")
+    if not is_contract_review_job(parent_job):
+        raise ValueError("Parent job is not a contract review job")
+
+    parent_run.amendment_run_id = None
+    db.add(parent_run)
+    db.commit()
+    db.refresh(parent_run)
+
+    child = start_amendment_run(db, owner, parent_run, parent_job, notes=notes)
+    if child:
+        db.refresh(parent_run)
+    return child

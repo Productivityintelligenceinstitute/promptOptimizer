@@ -40,6 +40,7 @@ _VALID_WORKFLOW_TYPES = frozenset(
         "procurement",
         "contract_review",
         "supplier_assessment",
+        "contract_amendment",
     }
 )
 

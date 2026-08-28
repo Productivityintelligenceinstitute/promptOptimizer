@@ -219,7 +219,53 @@ def ingest_documents(
 ) -> IngestionResult:
     """Ingest documents into the job's vector target (managed Jet KB or external connection)."""
     target = resolve_ingestion_target(db, job)
-    return ingest_to_target(target, documents, db, ingestion_config=ingestion_config)
+    return ingest_to_target(
+        target,
+        documents,
+        db,
+        ingestion_config=ingestion_config,
+        owner=job.owner,
+        job_id=job.id,
+    )
+
+
+def _persist_canonical_contracts(
+    documents: list[dict[str, Any]],
+    db: Session,
+    owner: str,
+    job_id: Any | None,
+) -> None:
+    """Persist full-text canonical copies of contract-type documents at ingest time."""
+    from context_jobs.services.canonical_contract import persist_canonical
+
+    for doc in documents:
+        text = (doc.get("text") or "").strip()
+        if len(text) < 200:
+            continue
+        meta = doc.get("metadata") or {}
+        doc_type = str(meta.get("documentType") or meta.get("document_type") or "").lower()
+        is_contract = doc_type in {"contract", "msa", "sow", "amendment", "nda"}
+        is_policy = doc_type == "policy"
+        if not is_contract and not is_policy and len(text) < 500:
+            continue
+        contract_id = meta.get("contractId") or meta.get("contract_id")
+        if is_policy:
+            contract_id = meta.get("policyId") or meta.get("policy_id") or contract_id
+        try:
+            persist_canonical(
+                db,
+                owner,
+                text,
+                source_doc_id=doc.get("id"),
+                contract_id=contract_id,
+                job_id=job_id,
+                source_type="jet_ingest",
+                metadata=meta if isinstance(meta, dict) else None,
+            )
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "canonical persist skipped for doc %s", doc.get("id"), exc_info=True,
+            )
 
 
 def ingest_to_target(
@@ -227,10 +273,15 @@ def ingest_to_target(
     documents: list[Any],
     db: Session,
     ingestion_config: dict[str, Any] | None = None,
+    owner: str | None = None,
+    job_id: Any | None = None,
 ) -> IngestionResult:
     """Ingest documents into a resolved vector target."""
     cfg = merge_ingestion_config(ingestion_config)
     documents = _normalize_documents(documents)
+
+    if owner:
+        _persist_canonical_contracts(documents, db, owner, job_id)
     auto_create = bool(cfg["auto_create_target"])
     chunk_size = int(cfg["chunk_size"])
     chunk_overlap = int(cfg["chunk_overlap"])

@@ -58,6 +58,15 @@ class FileWriteTool(BaseTool):
         else:
             target.write_text(content, encoding="utf-8")
 
+        from context_jobs.artifacts.blob_store import persist_run_artifact_file
+
+        persist_run_artifact_file(
+            owner,
+            run_id,
+            path_arg,
+            target,
+            tool_id=self.id,
+        )
         return (
             f"Wrote file: {path_arg} ({len(content)} chars, mode={mode}). "
             f"artifact_path={target.as_posix()}"

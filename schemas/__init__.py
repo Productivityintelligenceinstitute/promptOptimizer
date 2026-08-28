@@ -16,6 +16,7 @@ from schemas.tool_provider_key_model import ToolProviderKeyModel
 from schemas.tool_registry_model import ToolRegistryModel
 from schemas.tool_execution_model import ToolExecutionModel
 from schemas.run_memory_entry_model import RunMemoryEntryModel
+from schemas.run_artifact_blob_model import RunArtifactBlobModel
 
 __all__ = [
     "ChatModel",
@@ -39,4 +40,5 @@ __all__ = [
     "ToolRegistryModel",
     "ToolExecutionModel",
     "RunMemoryEntryModel",
+    "RunArtifactBlobModel",
 ]

@@ -87,7 +87,7 @@ async def _prerun_contract_analyzer(
         arguments={
             "source": "text",
             # Gateway consolidates full retrieved_context for source=text.
-            "value": retrieved_context[:4000],
+            "value": retrieved_context[:80_000],
             "contractType": "msa",
         },
     )
@@ -296,6 +296,15 @@ async def _execute_run_async(run_id: UUID) -> None:
             _finalize_running_step_logs(run)
             db.add(run)
             db.commit()
+
+            if (
+                (job.workflow_type or "").lower() == "contract_amendment"
+                and run.state in ("completed", "completed_with_warnings")
+            ):
+                _post_validate_amendment(db, run, job)
+                db.refresh(run)
+                state = run.state
+                outcome = run.outcome
 
             if state == "escalated":
                 cj_audit.write_audit_event(
@@ -528,6 +537,160 @@ def _finalize_running_step_logs(run_row: JobRunModel) -> None:
         return
     run_row.step_logs = logs
     flag_modified(run_row, "step_logs")
+
+
+def _post_validate_amendment(db: Session, run: JobRunModel, job: ContextJobModel) -> None:
+    """Run revision validation after a contract_amendment run completes."""
+    try:
+        from context_jobs.services.canonical_resolver import resolve_canonical_source
+        from context_jobs.services.revision_validator import validate_revision
+
+        parent_run = None
+        parent_job = None
+        if run.parent_run_id:
+            parent_run = db.query(JobRunModel).filter(JobRunModel.id == run.parent_run_id).first()
+        if parent_run:
+            parent_job = db.query(ContextJobModel).filter(ContextJobModel.id == parent_run.job_id).first()
+
+        source_job = parent_job or job
+        source_run = parent_run or run
+        canonical_text, _method = resolve_canonical_source(
+            db, job.owner or "", source_run, source_job,
+        )
+        if not canonical_text:
+            return
+
+        revised_text = _extract_revised_text_from_run(db, run)
+        if not revised_text:
+            return
+
+        validation = validate_revision(canonical_text, revised_text)
+
+        rop = dict(run.run_output_package or {})
+        rop["amendmentValidation"] = {
+            "passed": validation.passed,
+            "errors": validation.errors,
+            "warnings": validation.warnings,
+        }
+
+        if not validation.passed:
+            repair_cycles = int(getattr(run, "repair_cycles", None) or 0)
+            if repair_cycles < 1:
+                feedback = "\n".join(f"- {err}" for err in validation.errors)
+                run.user_request = (
+                    (run.user_request or "")
+                    + "\n\n## VALIDATION FAILED — regenerate the DOCX and fix every issue below.\n"
+                    "Do not drop any original clause to satisfy validation.\n"
+                    + feedback
+                )
+                rop["amendmentValidation"]["repairScheduled"] = True
+                run.run_output_package = rop
+                flag_modified(run, "run_output_package")
+                run.repair_cycles = repair_cycles + 1
+                run.state = "queued"
+                run.outcome = None
+                run.ended_at = None
+                db.add(run)
+                if parent_run is not None:
+                    parent_rop = dict(parent_run.run_output_package or {})
+                    parent_rop["amendmentValidation"] = rop["amendmentValidation"]
+                    parent_run.run_output_package = parent_rop
+                    flag_modified(parent_run, "run_output_package")
+                    db.add(parent_run)
+                db.commit()
+                from context_jobs.orchestrator import enqueue_run
+
+                queued = enqueue_run(run.id)
+                if not queued:
+                    run.state = "failed"
+                    run.outcome = "blocked"
+                    rop["amendmentValidation"]["blocked"] = True
+                    run.run_output_package = rop
+                    flag_modified(run, "run_output_package")
+                    db.add(run)
+                    db.commit()
+                    logger.warning("Amendment repair could not be queued for run %s", run.id)
+                    return
+                logger.info(
+                    "Amendment validation failed for run %s, re-queued repair (cycle %d)",
+                    run.id, run.repair_cycles,
+                )
+                return
+
+            run.state = "failed"
+            run.outcome = "blocked"
+            rop["amendmentValidation"]["blocked"] = True
+            rop["nextAction"] = {
+                "type": "blocked",
+                "label": "Revised contract failed validation — download blocked",
+            }
+
+        run.run_output_package = rop
+        flag_modified(run, "run_output_package")
+        db.add(run)
+        if parent_run is not None:
+            parent_rop = dict(parent_run.run_output_package or {})
+            parent_rop["amendmentValidation"] = rop["amendmentValidation"]
+            parent_run.run_output_package = parent_rop
+            flag_modified(parent_run, "run_output_package")
+            db.add(parent_run)
+        db.commit()
+
+    except Exception:
+        logger.exception("Amendment post-validation failed for run %s", run.id)
+
+
+def _extract_revised_text_from_run(db: Session, run: JobRunModel) -> str | None:
+    """Extract the full text from the revised DOCX artifact stored in blob."""
+    try:
+        from context_jobs.artifacts.blob_store import REVISED_CONTRACT_FILENAME, get_blob_artifact
+
+        job_row = db.query(ContextJobModel).filter(ContextJobModel.id == run.job_id).first()
+        owner = (job_row.owner if job_row else None) or ""
+        blob = get_blob_artifact(
+            owner=owner,
+            run_id=run.id,
+            relative_path=REVISED_CONTRACT_FILENAME,
+            db=db,
+        )
+
+        if blob and blob.content:
+            import io
+            try:
+                from docx import Document as DocxDocument
+
+                doc = DocxDocument(io.BytesIO(blob.content))
+                return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except Exception:
+                return blob.content.decode("utf-8", errors="replace")
+
+        # Fallback: docx-generate sections from tool_events
+        for event in (run.tool_events or []):
+            if not isinstance(event, dict):
+                continue
+            tool_id = str(event.get("toolId") or event.get("tool_id") or "").lower()
+            if tool_id != "docx-generate":
+                continue
+            args = event.get("arguments") or event.get("args") or {}
+            if isinstance(args, dict):
+                sections = args.get("sections") or []
+                if isinstance(sections, list):
+                    parts = []
+                    for section in sections:
+                        if isinstance(section, dict):
+                            heading = section.get("heading") or ""
+                            body = section.get("body") or ""
+                            if heading:
+                                parts.append(heading)
+                            if body:
+                                parts.append(body)
+                    if parts:
+                        return "\n\n".join(parts)
+
+        return run.output_text
+    except Exception:
+        logger.debug("Could not extract revised text for run %s", run.id, exc_info=True)
+        return None
 
 
 def _fail_run(db: Session, run: JobRunModel | UUID, message: str) -> None:

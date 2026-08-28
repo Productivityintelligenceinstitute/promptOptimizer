@@ -118,6 +118,24 @@ def import_clm_contract_into_job(
             if value is not None:
                 metadata[str(key)] = value
 
+    try:
+        from context_jobs.services.canonical_contract import persist_canonical
+
+        persist_canonical(
+            db,
+            owner,
+            text,
+            source_doc_id=f"clm-{conn.provider}-{document.resource_id}".lower()[:120],
+            contract_id=str(contract_id),
+            job_id=job_id,
+            source_type="clm_import",
+            metadata=metadata,
+        )
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("canonical persist skipped for CLM import", exc_info=True)
+
     result = ingest_documents(
         job=job,
         documents=[

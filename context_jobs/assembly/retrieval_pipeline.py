@@ -320,6 +320,7 @@ def _contract_metadata_search(
     trusted_sources: list[dict] | None,
     *,
     extra_metadata_filter: dict[str, Any] | None = None,
+    top_k: int = 50,
 ) -> tuple[list[Any], str | None]:
     """
     Metadata-only contract chunk retrieval via Pinecone vendorId filter.
@@ -340,7 +341,7 @@ def _contract_metadata_search(
     if not callable(search_fn):
         return [], None
 
-    matches = search_fn(metadata_filter, top_k=50) or []
+    matches = search_fn(metadata_filter, top_k=max(1, min(200, int(top_k)))) or []
     matches = apply_trusted_sources_filter(matches, trusted_sources, hard=True)
     matches = _sort_matches_by_chunk_index(matches)
     if matches:
@@ -449,6 +450,25 @@ def _merge_contract_review_matches(
     return _dedupe_matches([*selected_contract, *selected_policy])
 
 
+def _keep_all_scoped_review_matches(
+    contract_matches: list[Any],
+    policy_matches: list[Any],
+    fill_matches: list[Any],
+    *,
+    cap: int = 200,
+) -> list[Any]:
+    """Keep every scoped contract + policy chunk (sorted), not an even sample."""
+    policy = _sort_matches_by_chunk_index(_dedupe_matches(policy_matches))
+    policy_ids = {_match_id(m) for m in policy if _match_id(m)}
+    contract_pool = [
+        m
+        for m in _dedupe_matches([*contract_matches, *fill_matches])
+        if _match_id(m) not in policy_ids
+    ]
+    contract_pool = _sort_matches_by_chunk_index(contract_pool)
+    return _dedupe_matches([*contract_pool, *policy])[: max(1, cap)]
+
+
 def execute_retrieval(
     job: ContextJobModel,
     user_request: str,
@@ -470,6 +490,9 @@ def execute_retrieval(
     if retrieval_hints is None:
         retrieval_hints = extract_retrieval_hints(combined_query)
     if workflow == "contract_review":
+        from context_jobs.services.review_documents import merge_review_scope_hints
+
+        retrieval_hints = merge_review_scope_hints(job, retrieval_hints)
         retrieval_hints.setdefault("contractRenewal", True)
     if workflow in {"supplier_assessment", "procurement"}:
         retrieval_hints = _prepare_vendor_profile_workflow_hints(retrieval_hints)
@@ -566,6 +589,7 @@ def execute_retrieval(
             retrieval_hints,
             job.trusted_sources,
             extra_metadata_filter=vendor_metadata_filter,
+            top_k=200 if workflow == "contract_review" else 50,
         )
         used_metadata_filter = bool(matches)
         if used_metadata_filter and workflow == "contract_review":
@@ -575,7 +599,7 @@ def execute_retrieval(
             policy_matches = _policy_supplement_search(
                 adapter,
                 job.trusted_sources,
-                top_k=min(12, max(top_k, 8)),
+                top_k=50,
                 extra_metadata_filter=vendor_metadata_filter,
             )
             fill_matches = _contract_clause_fill_search(
@@ -585,11 +609,11 @@ def execute_retrieval(
                 top_k=min(16, max(top_k, 12)),
                 extra_metadata_filter=vendor_metadata_filter,
             )
-            matches = _merge_contract_review_matches(
+            matches = _keep_all_scoped_review_matches(
                 matches,
                 policy_matches,
                 fill_matches,
-                limit=max(top_k, 24),
+                cap=200,
             )
 
     if not used_metadata_filter:
@@ -761,6 +785,35 @@ def execute_retrieval(
         inline_traces,
         hybrid=hybrid or bool(inline_rag),
     )
+    if workflow == "contract_review":
+        from context_jobs.services.review_documents import (
+            build_document_level_rag_context,
+            canonical_source_traces,
+            resolve_review_documents,
+        )
+
+        try:
+            bundle = resolve_review_documents(db, job.owner or "", job, retrieval_hints)
+        except Exception:
+            logger.exception("canonical full-document load failed; using chunk RAG")
+            bundle = None
+        if bundle is not None and (bundle.has_contract or bundle.has_policy):
+            rag_context = build_document_level_rag_context(bundle, rag_context)
+            traces = canonical_source_traces(bundle)
+            source_trace_events = traces + list(source_trace_events or [])
+            retrieval_events.append(
+                {
+                    "query": "canonical_full_document",
+                    "source": traces[0]["sourceName"] if traces else "canonical",
+                    "resultCount": len(traces),
+                    "timestamp": now_iso,
+                    "retrievalMode": "canonical_full_document",
+                    "contractId": bundle.contract_id,
+                    "policyId": bundle.policy_id,
+                    "contractMethod": bundle.contract_method,
+                    "policyMethod": bundle.policy_method,
+                }
+            )
     if not rag_context.strip():
         rag_context = "No context retrieved."
     return RetrievalResult(
