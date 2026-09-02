@@ -149,7 +149,13 @@ CONTRACT_CLAUSE_CHECKLIST = """Review each clause area and cite contract evidenc
 6. AI use restrictions, training/data reuse, and model-output ownership
 7. Subprocessors, flow-down obligations, and notification rights
 8. Pricing, rate cards, escalation, and indexation mechanics
-9. Renewal notice period, auto-renewal, and opt-out windows"""
+9. Renewal notice period, auto-renewal, and opt-out windows
+10. After numbered amendment-ready recommendations, add ## Intent Behind the Edits.
+    For EACH material recommendation, write approximately two thorough paragraphs (not a 2–4
+    sentence blurb): (1) Buyer — why the current clause is a problem (policy, cash flow, ops,
+    legal risk) and what the edit is trying to achieve; (2) Seller — how they can accept or
+    counter without reopening the whole deal, including the commercial trade-off. Do not invent
+    extra recommendations in this section — only explain the ones already listed."""
 
 ANALYSIS_PROCUREMENT_VALIDATION_RULES: list[dict[str, Any]] = [
     {
@@ -226,11 +232,13 @@ CONTRACT_OUTPUT_FULL = """# Executive Summary
 ## Data Privacy and AI Compliance
 ## Policy Alignment
 ## Evidence Gaps
-## Recommended Next Actions"""
+## Recommended Next Actions
+## Intent Behind the Edits"""
 
 CONTRACT_OUTPUT_EXECUTIVE = """## Decision:
 ## Key Risks:
-## Next Step:"""
+## Next Step:
+## Negotiation Intent:"""
 
 CONTRACT_OUTPUT_SCORECARD = """{
   "overallRiskScore": 0,
@@ -245,7 +253,15 @@ CONTRACT_OUTPUT_SCORECARD = """{
     "pricing": {"score": 0, "status": "pass|watch|fail", "notes": ""},
     "renewalNotice": {"score": 0, "status": "pass|watch|fail", "notes": ""}
   },
-  "evidenceGaps": []
+  "evidenceGaps": [],
+  "editIntent": [
+    {
+      "clause": "",
+      "recommendation": "",
+      "buyerIntent": "",
+      "sellerTalkingPoint": ""
+    }
+  ]
 }"""
 
 CAPABILITY_OUTPUT_FULL = """# Executive Summary
@@ -515,7 +531,9 @@ def _contract_role_full() -> str:
         "In the Decision section, state an explicit renew / renegotiate / exit recommendation "
         "with a one-line rationale before detailed clause analysis. "
         "Cite evidence from contract text and trusted sources. Escalate high-risk clauses clearly "
-        "with clause-level findings and actionable next steps."
+        "with clause-level findings and actionable next steps. After numbered recommendations, "
+        "write approximately two thorough paragraphs of intent for each material edit so Buyer "
+        "and Seller can discuss it."
     )
 
 
@@ -524,7 +542,10 @@ def _contract_role_executive() -> str:
         "You are a procurement advisor briefing an executive decision-maker. "
         "Lead with a clear renew / renegotiate / exit decision, then the top risks and one next step. "
         "Keep the brief concise (target ≤400 words). Do not dump full clause tables—surface only "
-        "decision-critical findings with evidence references."
+        "decision-critical findings with evidence references. Close with Negotiation Intent: "
+        "approximately two thorough paragraphs per material edit so Buyer and Seller can talk "
+        "through why the change exists and how to accept or counter it. Negotiation Intent does "
+        "not count against the 400-word brief cap."
     )
 
 
@@ -532,7 +553,9 @@ def _contract_role_scorecard() -> str:
     return (
         "You are a procurement risk scorer for a review committee. "
         "Return only structured JSON matching the output template. Score clause health and renewal "
-        "urgency with short notes; prefer measurable status values over narrative prose."
+        "urgency with short notes; prefer measurable status values over narrative prose. Fill "
+        "editIntent for each material recommendation with approximately two thorough paragraphs: "
+        "buyerIntent (paragraph 1) and sellerTalkingPoint (paragraph 2)."
     )
 
 
