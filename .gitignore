@@ -36,6 +36,7 @@ context_jobs/run_demo_msa_*.py
 context_jobs/_resume_demo_msa_compare.py
 context_jobs/prepare_real_world_contracts.py
 context_jobs/seed_demo_clm_connections.py
+context_jobs/_live_*.py
 
 # Local compare / QA report outputs
 context_jobs/_last_*.txt

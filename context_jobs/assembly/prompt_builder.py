@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from context_jobs.agents.catalog import is_multi_agent_mode
-from context_jobs.assembly.output_format import build_output_format_prompt, clean_model_output
+from context_jobs.assembly.output_format import (
+    build_output_format_prompt,
+    clean_model_output,
+    is_executive_persona,
+    is_scorecard_persona,
+)
 from context_jobs.assembly.prompt_safety import (
     append_prompt_injection_policy,
     sanitize_topic_snippet,
@@ -27,7 +32,47 @@ def _workflow_tool_guidance(job: ContextJobModel) -> str | None:
     tools = _enabled_tool_ids(job)
     workflow = (job.workflow_type or "standard").lower()
 
-    if workflow == "contract_review" and "contract-analyzer" in tools:
+    if workflow == "contract_review":
+        intent_core = (
+            "For EACH material recommendation, write approximately two paragraphs of thorough "
+            "explanation — not a 2–4 sentence blurb and not a bullet list. Each paragraph should "
+            "be complete (roughly 4–7 sentences) so Buyer and Seller can discuss the change without "
+            "guessing at motive:\n"
+            "- Paragraph 1 (Buyer): why the current clause is a problem (policy, cash flow, "
+            "operational burden, or legal risk) and what the proposed edit is trying to achieve — "
+            "not just the new wording.\n"
+            "- Paragraph 2 (Seller): how the Seller can understand, accept, or counter the change "
+            "without reopening the whole deal, including the commercial trade-off and a concrete "
+            "talking point both sides can use.\n"
+            "Do not invent extra recommendations here. Only explain edits already listed. "
+            "Do not weaken numbered recommendations by burying them in this narrative."
+        )
+        if is_scorecard_persona(job):
+            intent_guidance = (
+                "## Intent Behind Recommended Edits\n"
+                "Fill editIntent for every material recommendation. Put paragraph 1 in buyerIntent "
+                "and paragraph 2 in sellerTalkingPoint.\n"
+                f"{intent_core}"
+            )
+        elif is_executive_persona(job):
+            intent_guidance = (
+                "## Intent Behind Recommended Edits\n"
+                "Close with Negotiation Intent. Use a subheading for each material recommendation "
+                "and write approximately two paragraphs under each.\n"
+                "Keep Decision, Key Risks, and Next Step concise. Negotiation Intent is extra "
+                "length and is not counted against the 400-word brief cap.\n"
+                f"{intent_core}"
+            )
+        else:
+            intent_guidance = (
+                "## Intent Behind Recommended Edits\n"
+                "After the numbered amendment-ready recommendations (Recommended Next Actions), "
+                "add a section titled Intent Behind the Edits. Use a matching subheading for each "
+                "numbered recommendation and write approximately two paragraphs under each.\n"
+                f"{intent_core}"
+            )
+        if "contract-analyzer" not in tools:
+            return intent_guidance
         return (
             "## Contract Analysis Tools\n"
             "You MUST call contract-analyzer before writing the final review — do not skip it "
@@ -45,7 +90,8 @@ def _workflow_tool_guidance(job: ContextJobModel) -> str | None:
             "substituting web/doc-reader content.\n"
             "Decision discipline (Full and Executive packs): state an explicit renew / "
             "renegotiate / exit recommendation early (Executive Summary or Decision section). "
-            "Calendar reminders alone are not a decision."
+            "Calendar reminders alone are not a decision.\n\n"
+            f"{intent_guidance}"
         )
 
     if workflow == "supplier_assessment":
