@@ -198,36 +198,64 @@ def _normalize_heading(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+# Template "## Decision:" vs model "## Decision" / demo "Clear recommendation".
+_HEADING_ALIASES: dict[str, frozenset[str]] = {
+    "decision": frozenset({"recommendation", "clear recommendation", "renewal decision"}),
+    "key risks": frozenset({"risks", "top risks", "commercial and policy risks", "policy risks"}),
+    "next step": frozenset(
+        {"what we must win", "must win", "next actions", "recommended next actions"}
+    ),
+    "negotiation intent": frozenset(
+        {"intent behind the edits", "intent behind recommended edits", "edit intent"}
+    ),
+}
+
+
+def _canonical_heading(text: str) -> str:
+    """Strip markdown, bold, and trailing 'Decision: Renew | …' value suffixes."""
+    line = re.sub(r"^#+\s*", "", text or "")
+    line = re.sub(r"[*_`]+", "", line).strip()
+    if ":" in line:
+        line = line.split(":", 1)[0].strip()
+    return _normalize_heading(line)
+
+
+def _headings_equivalent(required: str, candidate: str) -> bool:
+    left = _canonical_heading(required)
+    right = _canonical_heading(candidate)
+    if not left:
+        return True
+    if not right:
+        return False
+    if left == right or left in right or right in left:
+        return True
+    if right in _HEADING_ALIASES.get(left, frozenset()):
+        return True
+    heading_words = {w for w in left.split() if len(w) > 2}
+    line_words = {w for w in right.split() if len(w) > 2}
+    if not heading_words:
+        return False
+    overlap = len(heading_words & line_words)
+    return overlap >= max(2, int(len(heading_words) * 0.6))
+
+
 def _heading_in_output(heading: str, output: str) -> bool:
     """Match markdown headings or colon-style sections against template keys."""
-    normalized = _normalize_heading(heading)
+    normalized = _canonical_heading(heading)
     if not normalized:
         return True
 
     lower_output = (output or "").lower()
-
     if f"{normalized}:" in lower_output:
         return True
 
-    if re.search(rf"^#+\s*{re.escape(normalized)}\s*$", lower_output, re.MULTILINE):
-        return True
-
-    heading_words = {w for w in normalized.split() if len(w) > 2}
-    for raw_line in lower_output.splitlines():
+    for raw_line in (output or "").splitlines():
         line = raw_line.strip()
-        if not line.startswith("#"):
+        if not line:
             continue
-        line_heading = re.sub(r"^#+\s*", "", line).strip()
-        if not line_heading:
-            continue
-        if normalized in line_heading or line_heading in normalized:
-            return True
-        if not heading_words:
-            continue
-        line_words = {w for w in line_heading.split() if len(w) > 2}
-        overlap = len(heading_words & line_words)
-        if overlap >= max(2, int(len(heading_words) * 0.6)):
-            return True
+        if line.startswith("#") or line.endswith(":") or line.startswith("**"):
+            if _headings_equivalent(normalized, line):
+                return True
     return False
 
 
@@ -239,11 +267,15 @@ def _extract_template_keys(template: str) -> list[str]:
             continue
         heading = re.match(r"^#+\s+(.+)$", line)
         if heading:
-            keys.append(heading.group(1).strip().lower())
+            key = _canonical_heading(heading.group(1))
+            if key:
+                keys.append(key)
             continue
         pair = re.match(r"^([A-Za-z0-9_\-\s]+)\s*:", line)
         if pair:
-            keys.append(pair.group(1).strip().lower())
+            key = _canonical_heading(pair.group(1))
+            if key:
+                keys.append(key)
     return keys
 
 
