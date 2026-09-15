@@ -2,6 +2,7 @@
 
 Resolution waterfall:
   1. canonical_store   — by job_id
+  1b. canonical_demo_kb — owner demo-KB contract when ingest was skipped
   2. canonical_by_contract_id — from parent run source traces
   3. vector_stitch     — reassemble chunks from trusted-source vector hits
   4. knowledge_sources — inline text attached to the job
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 from context_jobs.services.canonical_contract import (
     load_canonical_by_contract_id,
     load_canonical_by_source_doc_id,
+    load_canonical_demo_for_owner,
     load_canonical_for_job,
 )
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
@@ -186,6 +188,11 @@ def resolve_canonical_source(
     text = load_canonical_for_job(db, owner, parent_job.id)
     if text:
         return text, "canonical_store"
+
+    # 1b. Demo KB already seeded for owner — text lives on the first seed job_id
+    text = load_canonical_demo_for_owner(db, owner)
+    if text:
+        return text, "canonical_demo_kb"
 
     # 2. Canonical by contract_id from parent run source traces
     for cid in _extract_contract_ids_from_traces(parent_run):

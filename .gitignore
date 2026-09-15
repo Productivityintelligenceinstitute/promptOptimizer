@@ -67,6 +67,11 @@ test_uploads/
 context_jobs/clm/_last_backend_api_e2e.txt
 context_jobs/clm/_last_live_user_e2e.txt
 
+# Local agent/session scratch at repo root (never commit)
+/_*.txt
+/_*.py
+/_pratik_guide_extract/
+
 # Local docs and generated docs not required on remote
 *.docx
 *.pdf

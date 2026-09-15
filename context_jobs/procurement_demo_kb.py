@@ -146,6 +146,64 @@ def _skipped_demo_ingestion_result() -> IngestionResult:
     )
 
 
+def _persist_demo_canonical_contracts(
+    db: Session,
+    owner: str,
+    job_id: UUID,
+    documents: list[dict[str, Any]],
+) -> None:
+    """First-seed upsert of demo contract full text onto this job."""
+    from context_jobs.services.canonical_contract import persist_canonical
+
+    for doc in documents:
+        meta = doc.get("metadata") or {}
+        doc_type = str(meta.get("documentType") or "").lower()
+        if doc_type not in {"contract", "msa", "sow", "amendment", "nda"}:
+            continue
+        text = (doc.get("text") or "").strip()
+        if len(text) < 200:
+            continue
+        persist_canonical(
+            db,
+            owner,
+            text,
+            source_doc_id=doc.get("id"),
+            contract_id=meta.get("contractId") or meta.get("contract_id"),
+            job_id=job_id,
+            source_type="demo_kb",
+            metadata=meta if isinstance(meta, dict) else None,
+        )
+
+
+def _ensure_demo_canonical_if_missing(
+    db: Session,
+    owner: str,
+    job_id: UUID,
+    documents: list[dict[str, Any]],
+) -> None:
+    """Skip-path fill: insert missing demo contracts only. No rewrite, no job_id relink."""
+    from context_jobs.services.canonical_contract import ensure_canonical_if_missing
+
+    for doc in documents:
+        meta = doc.get("metadata") or {}
+        doc_type = str(meta.get("documentType") or "").lower()
+        if doc_type not in {"contract", "msa", "sow", "amendment", "nda"}:
+            continue
+        text = (doc.get("text") or "").strip()
+        if len(text) < 200:
+            continue
+        ensure_canonical_if_missing(
+            db,
+            owner,
+            text,
+            source_doc_id=doc.get("id"),
+            contract_id=meta.get("contractId") or meta.get("contract_id"),
+            job_id=job_id,
+            source_type="demo_kb",
+            metadata=meta if isinstance(meta, dict) else None,
+        )
+
+
 def _delta_document_ids(from_version: int, to_version: int) -> frozenset[str]:
     ids: set[str] = set()
     for version in range(from_version + 1, to_version + 1):
@@ -173,44 +231,53 @@ def seed_demo_kb_for_job(
     if not job:
         raise ValueError(f"Job {job_id} not found for owner {owner!r}")
 
-    docs = documents if documents is not None else demo_kb_documents()
+    all_docs = documents if documents is not None else demo_kb_documents()
+    docs = all_docs
     uses_shared_jet_kb = (job.retrieval_mode or "jet_kb").strip().lower() == "jet_kb"
+    already_seeded = uses_shared_jet_kb and not force and is_demo_kb_seeded(db, owner)
+    current_version = get_demo_kb_bundle_version(db, owner) if already_seeded else 0
+    skip_full_ingest = already_seeded and current_version >= DEMO_KB_BUNDLE_VERSION
 
-    if uses_shared_jet_kb and not force and is_demo_kb_seeded(db, owner):
-        current_version = get_demo_kb_bundle_version(db, owner)
-        if current_version >= DEMO_KB_BUNDLE_VERSION:
-            return _skipped_demo_ingestion_result()
+    if skip_full_ingest:
+        try:
+            _ensure_demo_canonical_if_missing(db, owner, job_id, all_docs)
+        except Exception:
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "canonical ensure-if-missing failed for demo KB owner=%s job=%s",
+                owner,
+                job_id,
+                exc_info=True,
+            )
+        return _skipped_demo_ingestion_result()
+
+    if already_seeded:
         delta_ids = _delta_document_ids(current_version, DEMO_KB_BUNDLE_VERSION)
-        docs = [doc for doc in docs if doc.get("id") in delta_ids]
+        docs = [doc for doc in all_docs if doc.get("id") in delta_ids]
         if not docs:
             mark_demo_kb_seeded(db, owner, bundle_version=DEMO_KB_BUNDLE_VERSION)
+            try:
+                _ensure_demo_canonical_if_missing(db, owner, job_id, all_docs)
+            except Exception:
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "canonical ensure-if-missing failed for demo KB owner=%s job=%s",
+                    owner,
+                    job_id,
+                    exc_info=True,
+                )
             return _skipped_demo_ingestion_result()
 
     try:
-        from context_jobs.services.canonical_contract import persist_canonical
-
-        for doc in docs:
-            meta = doc.get("metadata") or {}
-            doc_type = str(meta.get("documentType") or "").lower()
-            if doc_type not in {"contract", "msa", "sow", "amendment", "nda"}:
-                continue
-            text = (doc.get("text") or "").strip()
-            if len(text) < 200:
-                continue
-            persist_canonical(
-                db,
-                owner,
-                text,
-                source_doc_id=doc.get("id"),
-                contract_id=meta.get("contractId") or meta.get("contract_id"),
-                job_id=job_id,
-                source_type="demo_kb",
-                metadata=meta if isinstance(meta, dict) else None,
-            )
+        _persist_demo_canonical_contracts(db, owner, job_id, all_docs)
     except Exception:
         import logging as _logging
 
-        _logging.getLogger(__name__).debug("canonical persist skipped for demo KB", exc_info=True)
+        _logging.getLogger(__name__).warning(
+            "canonical persist failed for demo KB owner=%s job=%s", owner, job_id, exc_info=True
+        )
 
     result = ingest_documents(job, docs, db, ingestion_config=ingestion_config)
 

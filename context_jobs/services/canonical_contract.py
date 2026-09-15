@@ -89,6 +89,77 @@ def persist_canonical(
     return row
 
 
+def ensure_canonical_if_missing(
+    db: Session,
+    owner: str,
+    text: str,
+    *,
+    source_doc_id: str | None = None,
+    contract_id: str | None = None,
+    job_id: UUID | None = None,
+    source_type: str = "demo_kb",
+    metadata: dict[str, Any] | None = None,
+) -> CanonicalContractModel | None:
+    """Insert only when this owner+source_doc_id has no row. Never rewrite existing text or job_id."""
+    if not source_doc_id or not (text or "").strip():
+        return None
+
+    existing = (
+        db.query(CanonicalContractModel)
+        .filter(
+            CanonicalContractModel.owner == owner,
+            CanonicalContractModel.source_doc_id == source_doc_id,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    return persist_canonical(
+        db,
+        owner,
+        text,
+        source_doc_id=source_doc_id,
+        contract_id=contract_id,
+        job_id=job_id,
+        source_type=source_type,
+        metadata=metadata,
+    )
+
+
+KNOWN_DEMO_CONTRACT_SOURCE_DOC_IDS = ("demo-msa-acme-2024",)
+
+
+def load_canonical_demo_for_owner(db: Session, owner: str) -> str | None:
+    """Demo contract for this owner, including legacy rows stored as jet_ingest."""
+    for source_doc_id in KNOWN_DEMO_CONTRACT_SOURCE_DOC_IDS:
+        text = load_canonical_by_source_doc_id(db, owner, source_doc_id)
+        if text and len(text.strip()) >= 200:
+            return text
+
+    rows = (
+        db.query(CanonicalContractModel)
+        .filter(
+            CanonicalContractModel.owner == owner,
+            CanonicalContractModel.source_type == "demo_kb",
+        )
+        .order_by(CanonicalContractModel.updated_at.desc())
+        .limit(20)
+        .all()
+    )
+    for row in rows:
+        meta = row.metadata_ if isinstance(row.metadata_, dict) else {}
+        doc_type = str(meta.get("documentType") or meta.get("document_type") or "").lower()
+        if doc_type == "policy":
+            continue
+        cid = str(row.contract_id or "")
+        if cid.upper().startswith("POL-") or "-PROC-" in cid.upper():
+            continue
+        if row.text and len(row.text.strip()) >= 200:
+            return row.text
+    return None
+
+
 def load_canonical_for_job(db: Session, owner: str, job_id: UUID) -> str | None:
     """Find canonical contract text by the job that ingested it."""
     row = (
