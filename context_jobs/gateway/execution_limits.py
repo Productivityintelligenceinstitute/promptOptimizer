@@ -21,6 +21,18 @@ _ANALYSIS_BUDGET = {
     "maxLatencyMs": 300000,
 }
 
+# Job builder historically defaulted maxLatencyMs to 30000. One contract-analyzer
+# turn + format repair exceeds that, so analysis-like workflows get a floor.
+_ANALYSIS_LIKE_WORKFLOWS = frozenset(
+    {
+        "analysis",
+        "contract_review",
+        "supplier_assessment",
+        "procurement",
+    }
+)
+_MIN_ANALYSIS_LATENCY_MS = 180000
+
 # Full conformed DOCX is one tool-call JSON payload. 4096 output tokens
 # cuts mid-size MSAs (~3k words). Floor is below typical 4o-mini max output.
 AMENDMENT_BUDGET_FLOOR = {
@@ -58,6 +70,13 @@ def resolve_budget_settings(job: ContextJobModel) -> dict:
     base = dict(_ANALYSIS_BUDGET if workflow == "analysis" else _DEFAULT_BUDGET)
     user = dict(job.budget_settings or {})
     base.update(user)
+    if workflow in _ANALYSIS_LIKE_WORKFLOWS:
+        try:
+            latency = int(base.get("maxLatencyMs") or 0)
+        except (TypeError, ValueError):
+            latency = 0
+        if latency < _MIN_ANALYSIS_LATENCY_MS:
+            base["maxLatencyMs"] = _MIN_ANALYSIS_LATENCY_MS
     return base
 
 
