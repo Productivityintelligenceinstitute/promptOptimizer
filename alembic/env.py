@@ -46,7 +46,9 @@ except (ImportError, ModuleNotFoundError, ValueError) as e:
 config = context.config
 
 # Get database URL from environment
-database_url = os.getenv("DATABASE_URL")
+from database.database import normalize_database_url
+
+database_url = normalize_database_url(os.getenv("DATABASE_URL"))
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

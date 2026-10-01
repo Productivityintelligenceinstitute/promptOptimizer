@@ -5,7 +5,7 @@ langchain_community
 langgraph
 fastapi[standard]>=0.115.0,<0.130.0
 requests
-sqlalchemy
+sqlalchemy>=2.0,<2.1
 psycopg2-binary
 dotenv
 pwdlib[argon2]

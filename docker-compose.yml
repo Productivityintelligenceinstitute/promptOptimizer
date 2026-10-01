@@ -50,7 +50,7 @@ services:
       - .env
     environment:
       # Inside Docker, DB/redis use service hostnames (not localhost).
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jetpromptoptimizer}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jetpromptoptimizer}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     ports:
       - "${APP_PORT:-8000}:8000"
