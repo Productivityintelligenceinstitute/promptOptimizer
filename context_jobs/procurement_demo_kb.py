@@ -25,10 +25,17 @@ DEMO_KB_DIR = Path(__file__).resolve().parent.parent / "docs" / "demo_kb"
 DEFAULT_TEMPLATE_NAME = "Contract Review & Renewal"
 
 # Bump when demo_kb_documents() gains files. Already-seeded owners ingest only the delta.
-DEMO_KB_BUNDLE_VERSION = 2
+DEMO_KB_BUNDLE_VERSION = 3
 # Document ids introduced in each bundle version (for delta ingest).
 _DEMO_KB_DELTA_BY_VERSION: dict[int, frozenset[str]] = {
     2: frozenset({"demo-job-taxonomy"}),
+    3: frozenset(
+        {
+            "demo-category-strategy-cloud-2026",
+            "demo-category-priorities-q3-2026",
+            "demo-category-signals-sep-2026",
+        }
+    ),
 }
 
 
@@ -112,6 +119,36 @@ def demo_kb_documents() -> list[dict[str, Any]]:
                 "riskTier": "low",
                 "spendTier": "1",
                 "linkedContractIds": [],
+            },
+        },
+        {
+            "id": "demo-category-strategy-cloud-2026",
+            "text": _read_text("category_strategy_cloud_infra_2026.txt"),
+            "metadata": {
+                "title": "Jet Industries Cloud Category Strategy 2026",
+                "documentType": "category_strategy",
+                "category": "Cloud Infrastructure",
+                "strategyYear": "2026",
+            },
+        },
+        {
+            "id": "demo-category-priorities-q3-2026",
+            "text": _read_text("category_stakeholder_priorities_q3_2026.txt"),
+            "metadata": {
+                "title": "Cloud Stakeholder Priorities Q3-Q4 2026",
+                "documentType": "stakeholder_priorities",
+                "category": "Cloud Infrastructure",
+                "period": "Q3-Q4 2026",
+            },
+        },
+        {
+            "id": "demo-category-signals-sep-2026",
+            "text": _read_text("category_signals_sep_2026.txt"),
+            "metadata": {
+                "title": "Cloud Category Signals Log September 2026",
+                "documentType": "category_signals",
+                "category": "Cloud Infrastructure",
+                "asOfDate": "2026-09-22",
             },
         },
     ]
