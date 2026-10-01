@@ -174,6 +174,35 @@ def _workflow_tool_guidance(job: ContextJobModel) -> str | None:
             "After spend-analyzer returns, write the final answer immediately without additional tool calls."
         )
 
+    if workflow == "research":
+        return (
+            "## Category Strategy Briefing\n"
+            "Begin with the current business intent and approved category strategy in the User request "
+            "and Retrieved Context. Do not open with unsourced market news.\n"
+            "Separate OBSERVED, INFERRED, and PROPOSED. Never invent objectives, stakeholder priorities, "
+            "supplier facts, project status, outcomes, spend, awards, clauses, deadlines, or owner timings.\n"
+            "Facts in the User request and in Retrieved Context are both usable. If a fact is in neither, "
+            "write 'Not available in retrieved vector context'. Do not claim a User-request fact is missing.\n"
+            "Stay faithful to source wording — do not turn 'consider' or 'balance' into mandates or "
+            "'mandate multi-cloud'.\n"
+            "When evidence covers MoUs, cost-monitoring, award-without-competition vs competitive selection, "
+            "lock-in / concentration risk, residency / offshoring, or framework scope exclusions, treat them "
+            "as distinct points and attribute each claim to the source that states it. Do not invent a "
+            "composite rule that one source does not state.\n"
+            "Disposition discipline: ACT only for clear time-bound actions in evidence; INVESTIGATE for "
+            "strategy/estate choices that need assessment; MONITOR when departmental detail is missing; "
+            "MAINTAIN when nothing material changed. Do not mark every issue ACT.\n"
+            "Web search may add external market signals only. It must not replace internal strategy, "
+            "spend, or supplier evidence.\n"
+            "Every priority issue needs Change, Evidence, Why It Matters, Strategy Connection, "
+            "Confidence, one disposition (ACT, INVESTIGATE, MONITOR, or MAINTAIN), and Decision Required.\n"
+            "High-impact issues with low confidence are INVESTIGATE. Do not hide them and do not "
+            "invent a recommendation so the briefing looks busy.\n"
+            "Flag strategy assumptions the evidence weakens or contradicts.\n"
+            "Cite material factual claims ONLY as [source:<documentId>] using IDs from Retrieved Context "
+            "(e.g. UK-OGCS-CLOUD-GUIDE-2023). Never use [project_…] tags or 'project memory'."
+        )
+
     return None
 
 

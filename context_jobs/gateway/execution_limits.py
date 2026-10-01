@@ -26,6 +26,7 @@ _ANALYSIS_BUDGET = {
 _ANALYSIS_LIKE_WORKFLOWS = frozenset(
     {
         "analysis",
+        "research",
         "contract_review",
         "supplier_assessment",
         "procurement",

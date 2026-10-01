@@ -113,6 +113,14 @@ _HIGH_RISK_DESCRIPTIONS: dict[str, str] = {
         "Explicitly flag rate variances above benchmark, unmapped roles, spend "
         "concentration risk, and material normalization issues."
     ),
+    "research": (
+        "Explicitly flag: (1) strategy assumptions that the evidence weakens or contradicts; "
+        "(2) high-impact low-confidence issues; (3) any priority that lacks a [source:documentId] "
+        "citation; (4) invented spend, awards, clauses, deadlines, or decision-owner timings not in "
+        "retrieved context; (5) overstated guidance (for example treating consider/balance as a "
+        "mandate, or marking every issue ACT); (6) fake citation tags such as [project_…] or "
+        "references to 'project memory'."
+    ),
     "procurement": (
         "Explicitly flag onboarding blockers across compliance, security, commercial "
         "terms, and open items requiring approval."
@@ -148,6 +156,11 @@ def _output_excerpt_for_high_risk_judge(output_text: str, *, max_chars: int = 70
         "risk posture",
         "high-risk",
         "material risk",
+        "assumption",
+        "disposition",
+        "priority issue",
+        "decision required",
+        "timing not available",
     )
     slices: list[str] = [text[:1800]]
     for anchor in anchors:

@@ -1,8 +1,10 @@
 from datetime import datetime
+from io import BytesIO
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from context_jobs.agents.catalog import list_specialist_catalog
@@ -13,12 +15,45 @@ from context_jobs.agents.execution_modes import (
 )
 from context_jobs.auth import get_context_jobs_owner_with_access
 from context_jobs.errors import raise_context_jobs_http
+from context_jobs.workflow_canvas import build_workflow_canvas_workbook, parse_workflow_canvas
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
 
 
 router = APIRouter(tags=["Context Jobs"])
+
+
+@router.get("/workflow-canvas/template")
+async def download_workflow_canvas_template(
+    owner: str = Depends(get_context_jobs_owner_with_access),
+):
+    """Blank Excel canvas for any context job. Upload the filled file back to the builder."""
+    del owner
+    payload = build_workflow_canvas_workbook()
+    return StreamingResponse(
+        BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="JET-workflow-canvas.xlsx"'},
+    )
+
+
+@router.post("/workflow-canvas/parse")
+async def parse_workflow_canvas_upload(
+    file: UploadFile = File(...),
+    currentStableInstructions: str = Form(""),
+    owner: str = Depends(get_context_jobs_owner_with_access),
+):
+    """Map a filled workflow canvas onto builder fields. Does not save the job."""
+    del owner
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload the .xlsx workflow canvas.")
+    payload = await file.read()
+    try:
+        return parse_workflow_canvas(payload, currentStableInstructions)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/jobs", response_model=list[cj_schemas.ContextJobOut])

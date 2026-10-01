@@ -125,6 +125,13 @@ RATE_CARD_TOOL_PERMISSIONS = [
     _perm("spend-analyzer", read_only=True),
 ]
 
+# Category briefing: retrieved strategy documents plus optional public market signals.
+CATEGORY_TOOL_PERMISSIONS = [
+    _perm("doc-reader", read_only=True),
+    _perm("web-search", read_only=True),
+    _perm("docx-generate", read_only=False),
+]
+
 TOOL_PROFILE_UNION = [
     _perm("doc-reader", read_only=True),
     _perm("web-search", read_only=True),
@@ -339,6 +346,84 @@ ONBOARDING_OUTPUT_SCORECARD = """{
   "requiredApprovals": []
 }"""
 
+CATEGORY_OUTPUT_FULL = """# Executive Summary
+## Strategic Pulse
+## What Materially Changed
+## Priority Issues
+## Emerging Insight
+## Value-Producing Projects
+## Decisions and Actions Required
+## Previous Actions and Learning
+## Evidence Gaps"""
+
+CATEGORY_OUTPUT_EXECUTIVE = """## Strategic Pulse:
+## What Materially Changed:
+## Priority Issues:
+## Decision Required:"""
+
+CATEGORY_OUTPUT_SCORECARD = """{
+  "strategicPulse": "",
+  "materialChanges": [],
+  "priorityIssues": [
+    {
+      "title": "",
+      "change": "",
+      "evidence": "",
+      "whyItMatters": "",
+      "strategyConnection": "",
+      "confidence": "low|medium|high",
+      "disposition": "ACT|INVESTIGATE|MONITOR|MAINTAIN",
+      "decisionRequired": ""
+    }
+  ],
+  "emergingInsight": "",
+  "valueProjects": [],
+  "decisionsRequired": [],
+  "previousActions": [],
+  "evidenceGaps": []
+}"""
+
+CATEGORY_SEMANTIC_BLUEPRINT = (
+    "INTENT → STRATEGY → REALITY → OUTCOMES. "
+    "Start from current business intent and the approved category strategy, then retrieved evidence. "
+    "Separate OBSERVED, INFERRED, and PROPOSED. "
+    "Connect every priority issue to a strategic object, search for counterevidence, and assign exactly one "
+    "disposition: ACT, INVESTIGATE, MONITOR, or MAINTAIN. "
+    "Stay faithful to source wording — do not escalate 'consider' or 'balance' into mandates. "
+    "Cite only with [source:documentId] from Retrieved Context — never invent project_* citation tags. "
+    "Do not invent objectives, stakeholder priorities, supplier facts, project status, outcomes, "
+    "deadlines, or decision-owner timings."
+)
+
+CATEGORY_STABLE_INSTRUCTIONS = """You are preparing a Category Strategy Intelligence Briefing for category leaders.
+Use the approved category strategy and the User request as the starting point. Do not start from news.
+
+Rules:
+1. Never invent business objectives, stakeholder priorities, category objectives, strategic assumptions, supplier facts, project status, outcomes, spend figures, awards, contract clauses, deadlines, or decision-owner calendar dates. Facts stated in the User request and facts in Retrieved Context are both usable. If a fact is in neither, write "Not available in retrieved vector context". Do not claim a User-request fact is missing from context.
+2. Treat the existing strategy as a reference, not unquestionable truth. Report both strategy-supporting evidence and strategy-challenging evidence. Explicitly flag any strategy assumption the evidence weakens or contradicts (in the affected Priority Issue and/or Emerging Insight).
+3. Label material claims OBSERVED, INFERRED, or PROPOSED. Do not infer causation only because an outcome followed an action.
+4. Identify the baseline before calling something a change. Keep persistent unresolved issues even when they are not new. Phrase Change lines using the source's strength of language (e.g. "consider / balance / risk" must not become "warns against", "requires multi-cloud", or "mandate multi-cloud").
+5. Connect every priority issue to at least one of: business objective, stakeholder priority, category objective, assumption, risk, opportunity, supplier, sourcing approach, initiative, decision, or expected outcome.
+6. Search for material counterevidence before a disposition. Score relevance, impact, urgency, confidence, and actionability separately. A high-impact issue with low confidence is INVESTIGATE, not hidden.
+7. Use only these dispositions: ACT, INVESTIGATE, MONITOR, MAINTAIN. Do not manufacture a recommendation to make the briefing look useful. Do not mark every issue ACT.
+   - ACT: a concrete, time-bound action is clearly required by retrieved evidence (e.g. a hard call-off signing deadline).
+   - INVESTIGATE: strategy choice, estate review, or feasibility assessment is needed before deciding (e.g. single-cloud vs multi-cloud / hybrid under lock-in or concentration-risk guidance that says "consider" or "balance").
+   - MONITOR: watch ongoing compliance or policy alignment where departmental detail is missing or only partially in context (e.g. residency / offshoring posture vs framework scope).
+   - MAINTAIN: no material change; continue current approach.
+8. For a proposed action, state supporting conditions, contradicting conditions, risks, prerequisites, and what would change the view. Never tell the owner to "mandate" an architecture the sources only ask them to consider.
+9. Decision Required: name a role only when the evidence or User request supports accountability (e.g. Category Manager Cloud, Commercial Lead, CISO / Security, Digital / Technology Lead). For timing, use only dates present in Retrieved Context or the User request; otherwise write "Timing not available in retrieved vector context". Never invent quarter/year deadlines (including inside the Decision Required sentence).
+10. Keep executive output to about 1–2 pages. Put source detail under Evidence Gaps or in the issue evidence line, not in a long appendix.
+11. Citations (mandatory): every material factual claim must use exactly `[source:<documentId>]` where `<documentId>` appears in Retrieved Context or trusted-source metadata (examples: UK-OGCS-CLOUD-GUIDE-2023, UK-CLOUD-FIRST-COMMERCIAL-PRIORITIES-2023, UK-GCLOUD15-SIGNALS-2026-08). Never use `[project_…]`, `[memory:…]`, or invented citation tags. Do not say "project memory" — ground Confidence in retrieved documents. Web search may supply external market signals only; it must not replace the category strategy or invent internal spend, suppliers, or decisions.
+12. Each Priority Issue must include: Change, Evidence, Why It Matters, Strategy Connection, Confidence, Disposition, and Decision Required. Evidence lines must include at least one valid `[source:…]` citation.
+13. When retrieved evidence covers commercial operating levers, address them as distinct points rather than blending sources into one claim — e.g. MoUs / aggregated leverage, cost-monitoring, award-without-competition vs competitive selection, lock-in / concentration risk, data residency / offshoring, and framework scope exclusions (such as contingent labour vs cloud support). Attribute each claim to the source that states it. Do not invent a rule that "AWOC now requires cost-monitoring because of MoUs" unless one source states that composite.
+14. If a workflow canvas block is present in these instructions, treat filled Trigger, Inputs, Human Decision, and End State lines as the operator's design for this run. They do not override retrieved evidence."""
+
+_CATEGORY_JOB_NAMES = (
+    "Category Strategy Intelligence Briefing",
+    "Category Strategy Intelligence Briefing (Executive)",
+    "Category Strategy Intelligence Briefing (Scorecard)",
+)
+
 
 def _glossary_content() -> dict[str, Any]:
     terms = [
@@ -367,6 +452,34 @@ def _glossary_content() -> dict[str, Any]:
             for term, definition in terms
         ]
     }
+
+
+def _category_glossary_terms() -> list[dict[str, Any]]:
+    """Category briefing glossary — no required MSA/SOW noise; guide language only."""
+    terms = [
+        ("category strategy", "Approved direction for how the organisation buys and manages a spend category."),
+        ("strategic pulse", "Short read on where the category stands relative to current intent and strategy."),
+        ("material change", "A new or shifted fact that alters strategy assumptions, sourcing routes, risk, or timing."),
+        ("disposition", "One of ACT, INVESTIGATE, MONITOR, or MAINTAIN for a priority issue."),
+        ("lock-in", "Difficulty, time, or cost of switching provider or technology once dependent on it."),
+        ("concentration risk", "Exposure from over-reliance on a single cloud provider, route, or capability."),
+        ("MoU", "Memorandum of Understanding using aggregated public-sector buying power with cloud providers."),
+        ("award without competition", "Call-off route awarding on lowest price after filters when catalogue needs are met."),
+        ("competitive selection", "Call-off route for complex or tailored needs, typically most advantageous tender."),
+        ("data residency", "Where data is stored, processed, managed, or accessed, including offshore personnel access."),
+        ("cloud support", "Support services tied to cloud use — distinct from contingent labour or staff provision."),
+        ("framework call-off", "Contract signed under a framework agreement by a stated signing or expiry deadline."),
+    ]
+    return [
+        {
+            "id": term.lower().replace(" ", "_").replace("&", "and"),
+            "term": term,
+            "definition": definition,
+            "synonyms": [],
+            "required": False,
+        }
+        for term, definition in terms
+    ]
 
 
 def _validation_contract_content() -> dict[str, Any]:
@@ -414,6 +527,7 @@ def _tool_profile_content() -> dict[str, Any]:
             "supplier_assessment": [p["toolId"] for p in CAPABILITY_TOOL_PERMISSIONS],
             "procurement": [p["toolId"] for p in ONBOARDING_TOOL_PERMISSIONS],
             "analysis": [p["toolId"] for p in RATE_CARD_TOOL_PERMISSIONS],
+            "research": [p["toolId"] for p in CATEGORY_TOOL_PERMISSIONS],
         },
         "toolPermissions": TOOL_PROFILE_UNION,
     }
@@ -661,6 +775,37 @@ def _onboarding_role() -> str:
     return _onboarding_role_full()
 
 
+def _category_role_full() -> str:
+    return (
+        "You are a senior category strategy advisor writing for category managers and procurement leaders. "
+        "Produce a briefing a stakeholder can read in a few minutes: what changed, why it matters to the "
+        "current strategy, and whether to act, investigate, monitor, or leave it. "
+        "Keep evidence attached to each issue with [source:documentId] citations only. "
+        "Do not turn the briefing into a news roundup. "
+        "Stay source-faithful; do not invent spend, awards, deadlines, owner timings, or project_* tags."
+    )
+
+
+def _category_role_executive() -> str:
+    return (
+        "You are briefing a category owner who has a few minutes. "
+        "Lead with the strategic pulse and only the issues that require a decision. "
+        "Keep the brief to about 1–2 pages. Use ACT, INVESTIGATE, MONITOR, or MAINTAIN. "
+        "Do not include taxonomy tables or source dumps. "
+        "Do not invent spend, awards, deadlines, or owner timings."
+    )
+
+
+def _category_role_scorecard() -> str:
+    return (
+        "You are producing a structured category-briefing scorecard. "
+        "Return only JSON matching the output template. "
+        "Every priority issue must include evidence, a strategy connection, confidence, "
+        "and one disposition: ACT, INVESTIGATE, MONITOR, or MAINTAIN. "
+        "Do not invent spend, awards, deadlines, or owner timings."
+    )
+
+
 RATE_CARD_STABLE_INSTRUCTIONS = (
     "Normalize the supplied rate card data using the job taxonomy.\n"
     "- Use rate card data from EVERY block in Retrieved Context (all vendors, all roles)\n"
@@ -787,6 +932,14 @@ def _job_definitions() -> list[dict[str, Any]]:
     onboarding_risk = (
         "Explicitly flag onboarding blockers: missing approvals, compliance/security gaps, "
         "and unresolved open items before go-live."
+    )
+    category_risk = (
+        "Explicitly flag: (1) strategy assumptions the evidence weakens or contradicts; "
+        "(2) high-impact issues with low confidence; (3) any priority issue that lacks a "
+        "[source:documentId] citation; (4) invented spend, awards, clauses, deadlines, or "
+        "decision-owner timings not in retrieved context; (5) overstated guidance (for example "
+        "treating consider/balance as a mandate, or marking every issue ACT); "
+        "(6) fake citation tags such as [project_…] or references to 'project memory'."
     )
 
     return [
@@ -1028,6 +1181,72 @@ def _job_definitions() -> list[dict[str, Any]]:
             "persona": "scorecard",
             "family": "supplier_onboarding",
         },
+        {
+            "name": "Category Strategy Intelligence Briefing",
+            "description": (
+                "Recurring 1–2 page briefing for category managers: what materially changed, why it matters "
+                "to the current strategy, and whether to act, investigate, monitor, or leave it. "
+                "Needs: approved category strategy, business priorities, and supplier or market evidence "
+                "in the User request or job knowledge base."
+            ),
+            "workflow_type": "research",
+            "goal": (
+                "Help category leaders see what changed, which strategy assumption or initiative it affects, "
+                "and what human decision is required."
+            ),
+            "semantic_blueprint": CATEGORY_SEMANTIC_BLUEPRINT,
+            "role_configuration": _category_role_full(),
+            "stable_instructions": CATEGORY_STABLE_INSTRUCTIONS,
+            "output_template": CATEGORY_OUTPUT_FULL,
+            "tool_permissions": CATEGORY_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=True, format_severity="error", high_risk_description=category_risk
+            ),
+            "persona": "full",
+            "family": "category_strategy",
+            **_analysis_job_fields(),
+        },
+        {
+            "name": "Category Strategy Intelligence Briefing (Executive)",
+            "description": (
+                "Executive category briefing: strategic pulse, material changes, priority issues, "
+                "and the decision required. Same method as the full briefing, shorter packaging. "
+                "Needs: category strategy and current evidence in the User request or job knowledge base."
+            ),
+            "workflow_type": "research",
+            "goal": "Deliver a 1–2 page category strategy briefing a stakeholder can act on.",
+            "semantic_blueprint": CATEGORY_SEMANTIC_BLUEPRINT,
+            "role_configuration": _category_role_executive(),
+            "stable_instructions": CATEGORY_STABLE_INSTRUCTIONS,
+            "output_template": CATEGORY_OUTPUT_EXECUTIVE,
+            "tool_permissions": CATEGORY_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=False, format_severity="error", high_risk_description=category_risk
+            ),
+            "persona": "executive",
+            "family": "category_strategy",
+            **_analysis_job_fields(),
+        },
+        {
+            "name": "Category Strategy Intelligence Briefing (Scorecard)",
+            "description": (
+                "Structured JSON category briefing for tracking dispositions, confidence, and open decisions. "
+                "Needs: category strategy and current evidence in the User request or job knowledge base."
+            ),
+            "workflow_type": "research",
+            "goal": "Return a structured category strategy briefing scorecard.",
+            "semantic_blueprint": CATEGORY_SEMANTIC_BLUEPRINT,
+            "role_configuration": _category_role_scorecard(),
+            "stable_instructions": CATEGORY_STABLE_INSTRUCTIONS,
+            "output_template": CATEGORY_OUTPUT_SCORECARD,
+            "tool_permissions": CATEGORY_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=False, format_severity="error", high_risk_description=category_risk
+            ),
+            "persona": "scorecard",
+            "family": "category_strategy",
+            **_analysis_job_fields(),
+        },
     ]
 
 
@@ -1182,6 +1401,7 @@ def _seed_jobs(db, assets_by_name: dict[str, ContextAssetModel]) -> tuple[list[s
             description=str(job_def.get("description") or f"System procurement template: {name}"),
             status="published",
             goal=job_def["goal"],
+            semantic_blueprint=job_def.get("semantic_blueprint"),
             workflow_type=job_def["workflow_type"],
             role_configuration=job_def["role_configuration"],
             stable_instructions=job_def["stable_instructions"],
@@ -1205,6 +1425,8 @@ def _seed_jobs(db, assets_by_name: dict[str, ContextAssetModel]) -> tuple[list[s
             workflow_tools,
             job_validation_rules=job_def.get("validation_rules"),
         )
+        if job_def.get("family") == "category_strategy":
+            job.glossary_terms = _category_glossary_terms()
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -1538,6 +1760,10 @@ def _sync_flagship_system_templates(db: Session) -> list[str]:
         if (job.goal or "").strip() != str(job_def["goal"]).strip():
             job.goal = job_def["goal"]
             changed = True
+        target_blueprint = job_def.get("semantic_blueprint")
+        if target_blueprint is not None and (job.semantic_blueprint or "").strip() != str(target_blueprint).strip():
+            job.semantic_blueprint = str(target_blueprint)
+            changed = True
         if (job.role_configuration or "").strip() != str(job_def["role_configuration"]).strip():
             job.role_configuration = job_def["role_configuration"]
             changed = True
@@ -1632,10 +1858,88 @@ def _sync_flagship_system_templates(db: Session) -> list[str]:
             )
             changed = True
 
+        if job_def.get("family") == "category_strategy":
+            target_glossary = _category_glossary_terms()
+            if list(job.glossary_terms or []) != target_glossary:
+                job.glossary_terms = target_glossary
+                changed = True
+
         if changed:
             db.add(job)
             updated.append(job.name)
 
+    if updated:
+        db.commit()
+    return updated
+
+
+def _sync_category_strategy_instantiated_jobs(db: Session) -> list[str]:
+    """Push Category Strategy prompt/glossary packs onto matching instantiated (non-system) jobs."""
+    updated: list[str] = []
+    defs_by_name = {
+        job_def["name"]: job_def
+        for job_def in _job_definitions()
+        if job_def.get("family") == "category_strategy"
+    }
+    if not defs_by_name:
+        return updated
+
+    jobs = (
+        db.query(ContextJobModel)
+        .filter(ContextJobModel.name.in_(list(defs_by_name.keys())))
+        .filter(ContextJobModel.owner != SYSTEM_OWNER)
+        .all()
+    )
+    for job in jobs:
+        job_def = defs_by_name.get(job.name or "")
+        if not job_def:
+            continue
+        changed = False
+        target_instructions = str(job_def["stable_instructions"])
+        if (job.stable_instructions or "").strip() != target_instructions.strip():
+            job.stable_instructions = target_instructions
+            changed = True
+        target_blueprint = job_def.get("semantic_blueprint")
+        if target_blueprint is not None and (job.semantic_blueprint or "").strip() != str(target_blueprint).strip():
+            job.semantic_blueprint = str(target_blueprint)
+            changed = True
+        target_role = str(job_def["role_configuration"])
+        if (job.role_configuration or "").strip() != target_role.strip():
+            job.role_configuration = target_role
+            changed = True
+        target_glossary = _category_glossary_terms()
+        if list(job.glossary_terms or []) != target_glossary:
+            job.glossary_terms = target_glossary
+            changed = True
+        desired_rules = [dict(r) for r in (job_def.get("validation_rules") or []) if isinstance(r, dict)]
+        policy_rules = [
+            rule
+            for rule in (job.validation_rules or [])
+            if isinstance(rule, dict) and str(rule.get("id") or "").startswith("policy_")
+        ]
+        next_rules = desired_rules + policy_rules
+        if list(job.validation_rules or []) != next_rules:
+            # Compare by id+description for high-risk text updates
+            def _sig(rules: list[Any]) -> list[tuple[str, str, str]]:
+                out: list[tuple[str, str, str]] = []
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    out.append(
+                        (
+                            str(rule.get("id") or ""),
+                            str(rule.get("type") or ""),
+                            str(rule.get("description") or ""),
+                        )
+                    )
+                return sorted(out)
+
+            if _sig(list(job.validation_rules or [])) != _sig(next_rules):
+                job.validation_rules = next_rules
+                changed = True
+        if changed:
+            db.add(job)
+            updated.append(f"{job.name}:{job.owner}")
     if updated:
         db.commit()
     return updated
@@ -1664,6 +1968,7 @@ def seed_procurement_templates(db: Session) -> None:
     patched_jobs = _patch_executive_output_templates(db)
     patched_rate_card = _patch_rate_card_templates(db)
     synced_flagship = _sync_flagship_system_templates(db)
+    synced_category_jobs = _sync_category_strategy_instantiated_jobs(db)
     patched_procurement = _patch_procurement_validation_and_retrieval(db)
     patched_chains = patch_procurement_chain_configs(db)
 
@@ -1681,6 +1986,11 @@ def seed_procurement_templates(db: Session) -> None:
         logger.info("Patched rate card templates: %s", ", ".join(patched_rate_card))
     if synced_flagship:
         logger.info("Synced flagship system templates: %s", ", ".join(synced_flagship))
+    if synced_category_jobs:
+        logger.info(
+            "Synced Category Strategy instantiated jobs: %s",
+            ", ".join(synced_category_jobs),
+        )
     if patched_procurement:
         logger.info(
             "Patched procurement validation/retrieval: %s",

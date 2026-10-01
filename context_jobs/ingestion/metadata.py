@@ -13,6 +13,9 @@ _CONTRACT_ID_RE = re.compile(
     r"\b([A-Z]{2,}(?:-[A-Z0-9]{2,}){2,})\b",
     re.IGNORECASE,
 )
+_CONTRACT_ID_INSTRUMENTS = frozenset(
+    {"MSA", "SOW", "NDA", "CSA", "SLA", "PO", "POL", "RCA", "WO", "MOU"}
+)
 _POLICY_ID_LABEL_RE = re.compile(
     r"\bpolicy\s*id\s*[:#]?\s*([A-Z]{2,}(?:-[A-Z0-9]{2,}){2,})",
     re.IGNORECASE,
@@ -123,8 +126,25 @@ _SKIP_VENDOR_TOKENS = frozenset(
 
 
 def _first_contract_id(text: str) -> str | None:
-    match = _CONTRACT_ID_RE.search(text or "")
-    return match.group(1).upper() if match else None
+    for match in _CONTRACT_ID_RE.finditer(text or ""):
+        candidate = match.group(1).upper()
+        if _is_plausible_contract_id(candidate):
+            return candidate
+    return None
+
+
+def _is_plausible_contract_id(token: str) -> bool:
+    """
+    Reject hyphenated prose false positives (e.g. award-without-competition).
+
+    Real IDs usually include a year/sequence digit, or a known instrument token.
+    """
+    t = (token or "").strip().upper()
+    if not t or t.count("-") < 2:
+        return False
+    if re.search(r"\d", t):
+        return True
+    return bool(set(t.split("-")) & _CONTRACT_ID_INSTRUMENTS)
 
 
 def _coalesce_str(meta: dict[str, Any], *keys: str) -> str | None:
@@ -477,7 +497,13 @@ def extract_retrieval_hints(text: str) -> dict[str, Any]:
     sample = text or ""
     hints: dict[str, Any] = {}
 
-    contract_ids = sorted({m.group(1).upper() for m in _CONTRACT_ID_RE.finditer(sample)})
+    contract_ids = sorted(
+        {
+            m.group(1).upper()
+            for m in _CONTRACT_ID_RE.finditer(sample)
+            if _is_plausible_contract_id(m.group(1))
+        }
+    )
     if contract_ids:
         hints["contractIds"] = contract_ids
 
@@ -543,12 +569,16 @@ def _meta_blob(meta: dict[str, Any]) -> str:
         for key in (
             "contractId",
             "contract_id",
+            "documentId",
+            "document_id",
+            "id",
             "contractName",
             "contract_name",
             "vendor",
             "title",
             "file",
             "source",
+            "name",
             "expiryDate",
             "expiry_date",
             "preview",
@@ -573,6 +603,10 @@ def metadata_match_score(
 
     for cid in hints.get("contractIds") or []:
         if cid.lower() in blob:
+            score += 3.0
+
+    for did in hints.get("documentIds") or []:
+        if str(did).lower() in blob:
             score += 3.0
 
     for vid in hints.get("vendorIds") or []:
@@ -621,6 +655,7 @@ def metadata_matches_hints(
 ) -> bool:
     scoped = bool(
         hints.get("contractIds")
+        or hints.get("documentIds")
         or hints.get("vendorIds")
         or hints.get("vendors")
         or hints.get("contractNames")
@@ -696,6 +731,36 @@ def build_pinecone_metadata_filter(hints: dict[str, Any]) -> dict[str, Any] | No
         clauses.append({"contractId": {"$eq": contract_ids[0]}})
     elif len(contract_ids) > 1:
         clauses.append({"$or": [{"contractId": {"$eq": cid}} for cid in contract_ids]})
+
+    document_ids = [
+        str(item).strip()
+        for item in (hints.get("documentIds") or [])
+        if str(item).strip()
+    ]
+    if len(document_ids) == 1:
+        clauses.append(
+            {
+                "$or": [
+                    {"documentId": {"$eq": document_ids[0]}},
+                    {"id": {"$eq": document_ids[0]}},
+                    {"source": {"$eq": document_ids[0]}},
+                ]
+            }
+        )
+    elif len(document_ids) > 1:
+        clauses.append(
+            {
+                "$or": [
+                    item
+                    for doc_id in document_ids
+                    for item in (
+                        {"documentId": {"$eq": doc_id}},
+                        {"id": {"$eq": doc_id}},
+                        {"source": {"$eq": doc_id}},
+                    )
+                ]
+            }
+        )
 
     # Exact vendor $eq is fragile (stored party can be customer vs provider, and
     # prompts often extract a short token like "Acme"). Prefer contractId/vendorId.

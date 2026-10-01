@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -268,6 +269,33 @@ def _prepare_rate_card_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[s
 _prepare_supplier_assessment_hints = _prepare_vendor_profile_workflow_hints
 
 
+def _prepare_research_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[str, Any]:
+    """
+    Category strategy / research briefs are not MSA contract reviews.
+
+    Drop contract-scope hints so hyphenated prose and strategy document IDs do not
+    force CONTRACT_SCOPE metadata retrieval (which returns empty for KB strategy docs).
+    Trusted sources + semantic search ground these runs.
+    """
+    hints = dict(retrieval_hints or {})
+    # Preserve plausible strategy document IDs for soft ranking / citation grounding.
+    preserved_doc_ids: list[str] = []
+    for cid in hints.get("contractIds") or []:
+        token = str(cid).strip()
+        if token and re.search(r"\d", token):
+            preserved_doc_ids.append(token.upper())
+    for did in hints.get("documentIds") or []:
+        token = str(did).strip()
+        if token and token.upper() not in preserved_doc_ids:
+            preserved_doc_ids.append(token.upper())
+
+    for key in ("contractIds", "contractNames", "contractRenewal", "vendorIds", "vendors"):
+        hints.pop(key, None)
+    if preserved_doc_ids:
+        hints["documentIds"] = preserved_doc_ids
+    return hints
+
+
 def _semantic_vector_search(
     adapter: Any,
     combined_query: str,
@@ -501,9 +529,12 @@ def execute_retrieval(
     if workflow == "analysis":
         retrieval_hints = _prepare_rate_card_workflow_hints(retrieval_hints)
         top_k = max(top_k, 16)
+    if workflow == "research":
+        retrieval_hints = _prepare_research_workflow_hints(retrieval_hints)
+        top_k = max(top_k, 12)
     preview_limit = (
         1200
-        if workflow in {"analysis", "contract_review", "supplier_assessment", "procurement"}
+        if workflow in {"analysis", "contract_review", "supplier_assessment", "procurement", "research"}
         else 600
     )
     if isinstance(retrieval_config, dict) and retrieval_config.get("queryRewriting"):
@@ -582,8 +613,13 @@ def execute_retrieval(
         or retrieval_hints.get("contractNames")
         or retrieval_hints.get("contractIds")
     )
-    # Capability / onboarding / rate-card must not use MSA contract-scope retrieval.
-    if has_contract_scope and workflow not in {"supplier_assessment", "procurement", "analysis"}:
+    # Capability / onboarding / rate-card / category research must not use MSA contract-scope retrieval.
+    if has_contract_scope and workflow not in {
+        "supplier_assessment",
+        "procurement",
+        "analysis",
+        "research",
+    }:
         matches, metadata_filter_warning = _contract_metadata_search(
             adapter,
             retrieval_hints,
