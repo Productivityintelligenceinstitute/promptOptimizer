@@ -1,0 +1,29 @@
+JET INDUSTRIES — CATEGORY SIGNALS LOG
+Category: Cloud Infrastructure & Cloud Professional Services
+Document type: category_signals
+As-of: 22 September 2026
+Compiled by: Category Management (demo pack)
+
+OBSERVED — INTERNAL
+S1. Acme MSA ACME-MSA-2024-001 expires 31 December 2026. Medium-complexity renewal lead time in policy is six months; the formal challenge window is therefore already open.
+S2. Acme rate card shows several Senior Cloud / Architect titles more than 15% above the Jet taxonomy benchmark used in the last Rate Card Normalization run.
+S3. Cloud concentration: Acme remains the dominant production host. CloudCo has no linked production MSA yet; annual estimated spend with CloudCo is about $280K (FinOps / security tooling path).
+S4. Prior cycle open actions still unresolved: Acme renegotiation timing; CloudCo elevation; category rate ceiling for cloud engineering titles.
+
+OBSERVED — SUPPLIER / MARKET
+S5. CloudCo continues to market EU data residency packaging and SOC 2 / ISO 27001 on request; still positioned as tactical under $500K ACV in the vendor profile.
+S6. NexGen Analytics remains linked commercially to the Acme relationship for analytics / ML platform work and is not a direct IaaS substitute.
+S7. Public cloud professional-services rate pressure remains elevated in US and EU markets for senior engineering titles (use as external context only; do not invent Jet-specific amounts beyond this log and retrieved rate-card evidence).
+
+INFERRED (LABEL CLEARLY IF USED)
+I1. If the Acme challenge window is missed, auto-renewal mechanics may force a defensive rather than competitive renewal.
+I2. If CloudCo stays only in FinOps, the dual-supplier posture in Assumption A4 cannot be executed for production continuity.
+
+COUNTEREVIDENCE / GAPS
+G1. No board-approved case yet to breach the $4.2M professional-services spend assumption.
+G2. No completed side-by-side production RFP scorecard for CloudCo versus Acme for core IaaS.
+G3. Exact notice-period calendar dates should be confirmed from the Acme MSA text before an ACT disposition on renegotiation timing.
+
+PRIOR EXPECTED VS OBSERVED
+- Expected last quarter: challenge list for Acme rate outliers delivered to SteerCo. Observed: outliers identified in rate-card work; commercial follow-through still open.
+- Expected last quarter: residency path decision for EU teams. Observed: CloudCo option remains unevaluated as a secondary production path.
