@@ -1,0 +1,33 @@
+JET INDUSTRIES — STAKEHOLDER PRIORITIES
+Category: Cloud Infrastructure & Cloud Professional Services
+Document type: stakeholder_priorities
+Period: Q3–Q4 2026
+Prepared: 12 September 2026
+Audience: Cloud SteerCo / Category Management
+
+1. CURRENT BUSINESS PRIORITIES
+P1. Protect production uptime on the Acme-hosted platforms through year-end close.
+P2. Cut avoidable professional-services overspend on cloud engineering titles before the November budget lock.
+P3. Give EU product teams a residency-ready path without opening a second full MSA if CloudCo can cover it.
+P4. Reduce executive surprise on renewal timing; Cloud SteerCo wants a one-page pulse every quarter.
+
+2. STAKEHOLDER OWNERS
+- Business outcome owner: VP Product Platforms
+- Commercial owner: Category Manager, Cloud
+- Risk / security owner: CISO office (residency and AI-training clauses)
+- Finance partner: FP&A Cloud Cost Center
+
+3. DECISIONS REQUESTED THIS CYCLE
+D1. Confirm whether Acme renegotiation should be scheduled before the six-month renewal alert fires.
+D2. Approve or reject elevating CloudCo from tactical FinOps to secondary production support evaluation.
+D3. Publish or defer a category rate ceiling for Senior Cloud Engineer / Cloud Architect titles.
+
+4. CONSTRAINTS
+- No new enterprise CLM project this quarter; use existing Jet Context Jobs and current vendor packs.
+- Legal will not re-open MSA boilerplate unless a material liability or AI-training gap is evidenced.
+- Hiring managers must not bypass rate-card normalization for cloud T&M work above $75K.
+
+5. WHAT GOOD LOOKS LIKE FOR THE NEXT BRIEFING
+- Strategic Pulse names the one commercial decision that matters this quarter.
+- Each priority issue links to an objective or assumption in the approved 2026 category strategy.
+- Dispositions use only ACT / INVESTIGATE / MONITOR / MAINTAIN with a named human owner.

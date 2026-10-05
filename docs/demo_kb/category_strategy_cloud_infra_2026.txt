@@ -1,0 +1,47 @@
+JET INDUSTRIES — APPROVED CATEGORY STRATEGY
+Category: Cloud Infrastructure & Cloud Professional Services
+Document type: category_strategy
+Version: 2026.1
+Approved: 18 March 2026
+Owner: Category Management / Strategic Sourcing
+Next formal review: December 2026
+
+1. BUSINESS INTENT
+Jet Industries will treat cloud infrastructure and related professional services as a strategic category.
+The category must protect continuity of production workloads, reduce uncontrolled rate inflation, and give
+business stakeholders a clear view of concentration and renewal risk.
+
+2. CATEGORY OBJECTIVES
+- Keep production cloud platforms available without single-supplier lock-in for critical workloads.
+- Hold professional-services cloud rates within ±10% of approved category medians unless an exception is logged.
+- Bring every Tier-1 / Tier-2 cloud agreement into the renewal pipeline at least six months before expiry.
+- Prefer suppliers that can show FinOps, security posture, and residency packaging with cited evidence.
+
+3. STRATEGIC ASSUMPTIONS
+A1. Acme Cloud Services remains the incumbent for core infrastructure through 31 December 2026
+    (contract ACME-MSA-2024-001).
+A2. CloudCo Systems remains the preferred challenger for FinOps and EU residency packaging.
+A3. Annual cloud professional-services spend stays under $4.2M unless a board-approved growth case is opened.
+A4. Business stakeholders will accept a dual-supplier posture when concentration risk exceeds 60% of category spend.
+A5. No material change in EU AI / data-training restrictions will force a mid-cycle renegotiation in 2026.
+
+4. SOURCING APPROACH
+- Incumbent management: Acme for core IaaS / managed cloud with commercial challenge at renewal.
+- Challenger path: CloudCo for FinOps / security posture work under $500K ACV.
+- Rate card discipline: normalize titles against the Jet job taxonomy before approving T&M engagements.
+- Decision cadence: quarterly Category Strategy Intelligence Briefing to the Cloud SteerCo.
+
+5. KNOWN RISKS
+- Auto-renewal and notice windows on the Acme MSA can trap spend if the briefing cycle slips.
+- Me-too positioning between Acme and challengers can hide real FinOps differentiation.
+- Unmapped rate-card titles create false savings claims.
+
+6. OPEN DECISIONS CARRIED FROM PRIOR CYCLE
+- Whether to open a competitive renegotiation with Acme before the 2026 renewal window.
+- Whether CloudCo should be elevated from tactical FinOps to a secondary production support path.
+- Whether a category-level rate ceiling should be published to hiring managers for cloud engineering roles.
+
+7. SUCCESS MEASURES FOR THIS STRATEGY
+- Zero Tier-1 cloud renewals entered with less than 90 days remaining notice.
+- At least one evidenced challenger option presented for every material Acme rate variance above 15%.
+- Stakeholder briefing cycle time under five business days from evidence close to published brief.
