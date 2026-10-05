@@ -65,8 +65,10 @@ Thumbs.db
 *.swo
 *~
 
-# Documentation
-docs/
+# Documentation. Keep demo_kb: the app reads those files at runtime.
+# A bare "docs/" cannot be undone for a child folder, so ignore the contents.
+docs/*
+!docs/demo_kb/
 README.md
 LICENSE
 
