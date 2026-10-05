@@ -41,6 +41,7 @@ _VALID_WORKFLOW_TYPES = frozenset(
         "contract_review",
         "supplier_assessment",
         "contract_amendment",
+        "sow_intelligence",
     }
 )
 
@@ -52,6 +53,7 @@ _TOOL_HINTS: dict[str, tuple[str, ...]] = {
     # spend-analyzer is rate-card specific — only include when the LLM/request implies it
     "analysis": ("doc-reader", "file-write"),
     "research": ("doc-reader", "web-search", "file-write"),
+    "sow_intelligence": ("doc-reader", "docx-generate"),
     "monitoring": ("doc-reader", "file-write"),
     "extraction": ("doc-reader", "file-write"),
     "decision": ("doc-reader", "file-write"),
@@ -113,6 +115,22 @@ _DEFAULT_CHECKS: dict[str, list[dict[str, Any]]] = {
             "enabled": True,
             "severity": "warning",
             "description": "Cite sources for material claims.",
+        },
+    ],
+    "sow_intelligence": [
+        {
+            "name": "Groundedness",
+            "type": "groundedness",
+            "enabled": True,
+            "severity": "error",
+            "description": "Do not invent fees, owners, dates, or clauses absent from the SOW and MSA.",
+        },
+        {
+            "name": "Citation coverage",
+            "type": "citation",
+            "enabled": True,
+            "severity": "warning",
+            "description": "Cite the SOW, MSA, or prior SOW for material findings.",
         },
     ],
 }
@@ -399,7 +417,7 @@ Return ONLY a valid JSON object with these fields:
   "name": "short job name",
   "description": "what this job does",
   "goal": "the primary objective",
-  "workflowType": "standard|research|analysis|generation|review|decision|extraction|monitoring|procurement|contract_review|supplier_assessment",
+  "workflowType": "standard|research|analysis|generation|review|decision|extraction|monitoring|procurement|contract_review|supplier_assessment|sow_intelligence",
   "semanticBlueprint": "expected output structure using ## headings",
   "outputTemplate": "optional exact output structure to follow",
   "stableInstructions": "numbered list of rules the agent must follow",
@@ -434,7 +452,7 @@ Field rules:
 - executionModel must be exactly one of: claude-haiku-4-5, claude-sonnet-4-5, claude-opus-4-5, gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gemini-2.5-pro, gemini-2.5-flash
 - retrievalMode must be exactly: jet_kb
 - executionMode must be exactly: single_agent or provider_multi_agent
-- workflowType must be exactly one of: standard, research, analysis, generation, review, decision, extraction, monitoring, procurement, contract_review, supplier_assessment
+- workflowType must be exactly one of: standard, research, analysis, generation, review, decision, extraction, monitoring, procurement, contract_review, supplier_assessment, sow_intelligence
 - toolPermissions.toolId must be exactly one of: {tool_ids}
 - toolPermissions.readOnly must be false for file-write, docx-generate, and code-exec; true for all other tools
 - Prefer doc-reader for pasted/ingested document workflows; contract-analyzer only for MSA/contract clause extraction; spend-analyzer only for rate-card / pricing normalization; web-search only when live web lookup is essential

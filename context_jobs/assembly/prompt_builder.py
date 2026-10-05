@@ -203,6 +203,32 @@ def _workflow_tool_guidance(job: ContextJobModel) -> str | None:
             "(e.g. UK-OGCS-CLOUD-GUIDE-2023). Never use [project_…] tags or 'project memory'."
         )
 
+    if workflow == "sow_intelligence":
+        return (
+            "## SOW Intelligence\n"
+            "The object is the draft or current Statement of Work, read with the business intake and any "
+            "governing MSA or prior SOW in Retrieved Context. Do not run a renewal redline.\n"
+            "Classify as exactly one of Staffing, SOW-T&M, Deliverable, Managed Service, or Ambiguous. "
+            "The title does not decide the class. Customer day-to-day direction of named people is Staffing.\n"
+            "Test each deliverable for 5W1H, supplier control, dependency ownership, performance cadence, "
+            "and whether payment matches acceptance, a unit, or a measurable managed service.\n"
+            "For why, use the business intake in the User request when it states the outcome the buyer wants. "
+            "A target date in that intake is buyer intent, not an acceptance date, unless the SOW states it.\n"
+            "A monthly invoice that is not tied to completion is a capacity-style payment. Flag it and quote "
+            "the fee figure from the source. A price increase with no cost evidence stays flagged — do not "
+            "invent the explanation, and quote the percentage.\n"
+            "Fill ## MSA Boundary. If the draft repeats liability, confidentiality, or governing law, name those "
+            "topics and cite both the SOW id and the MSA id. If no MSA is in context, write "
+            "'Not available in retrieved vector context'. Leave enforceability to counsel.\n"
+            "Fill ## Prior SOW Comparison. State how acceptance and payment differ and cite the prior SOW id. "
+            "If no prior SOW is in context, write 'Not available in retrieved vector context'.\n"
+            "Use exactly one disposition: Proceed, Proceed with Clarification, Redesign Commercial Model, "
+            "Escalate, or Do Not Approve Yet.\n"
+            "Web search is not available. Cite material facts ONLY as [source:<documentId>] using IDs from "
+            "Retrieved Context (e.g. NW-SOW-2026-014). If a fact is in neither the User request nor "
+            "Retrieved Context, write 'Not available in retrieved vector context'."
+        )
+
     return None
 
 

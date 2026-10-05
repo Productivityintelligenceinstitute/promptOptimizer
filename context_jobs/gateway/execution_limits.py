@@ -30,6 +30,7 @@ _ANALYSIS_LIKE_WORKFLOWS = frozenset(
         "contract_review",
         "supplier_assessment",
         "procurement",
+        "sow_intelligence",
     }
 )
 _MIN_ANALYSIS_LATENCY_MS = 180000

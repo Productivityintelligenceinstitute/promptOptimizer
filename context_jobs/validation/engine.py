@@ -121,6 +121,12 @@ _HIGH_RISK_DESCRIPTIONS: dict[str, str] = {
         "mandate, or marking every issue ACT); (6) fake citation tags such as [project_…] or "
         "references to 'project memory'."
     ),
+    "sow_intelligence": (
+        "Explicitly flag: (1) a title that disagrees with who directs the work or how payment is triggered; "
+        "(2) deliverables that fail 5W1H or have no supplier control; (3) monthly or capacity-style fees "
+        "that are not a measurable managed service; (4) price increases with no cost evidence; "
+        "(5) legal terms copied from the MSA; (6) invented fees, owners, dates, or citation tags."
+    ),
     "procurement": (
         "Explicitly flag onboarding blockers across compliance, security, commercial "
         "terms, and open items requiring approval."

@@ -27,6 +27,7 @@ RESULT_TYPE_MAP = {
     "contract_review": "contract_review",
     "contract_amendment": "revised_contract",
     "supplier_assessment": "supplier_assessment",
+    "sow_intelligence": "decision_memo",
 }
 
 NEXT_ACTION_MAP = {

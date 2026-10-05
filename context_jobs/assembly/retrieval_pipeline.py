@@ -296,6 +296,19 @@ def _prepare_research_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[st
     return hints
 
 
+def _prepare_sow_workflow_hints(retrieval_hints: dict[str, Any]) -> dict[str, Any]:
+    """
+    SOW intelligence reads the statement of work and its governing agreement.
+
+    Do not turn the run into an MSA renewal review, and do not drop the SOW/MSA
+    document types the way a category briefing drops contract scope.
+    """
+    hints = dict(retrieval_hints or {})
+    hints.pop("contractRenewal", None)
+    hints["documentTypes"] = ["sow", "contract", "policy"]
+    return hints
+
+
 def _semantic_vector_search(
     adapter: Any,
     combined_query: str,
@@ -532,9 +545,19 @@ def execute_retrieval(
     if workflow == "research":
         retrieval_hints = _prepare_research_workflow_hints(retrieval_hints)
         top_k = max(top_k, 12)
+    if workflow == "sow_intelligence":
+        retrieval_hints = _prepare_sow_workflow_hints(retrieval_hints)
+        top_k = max(top_k, 12)
     preview_limit = (
         1200
-        if workflow in {"analysis", "contract_review", "supplier_assessment", "procurement", "research"}
+        if workflow in {
+            "analysis",
+            "contract_review",
+            "supplier_assessment",
+            "procurement",
+            "research",
+            "sow_intelligence",
+        }
         else 600
     )
     if isinstance(retrieval_config, dict) and retrieval_config.get("queryRewriting"):
@@ -613,12 +636,14 @@ def execute_retrieval(
         or retrieval_hints.get("contractNames")
         or retrieval_hints.get("contractIds")
     )
-    # Capability / onboarding / rate-card / category research must not use MSA contract-scope retrieval.
+    # Capability / onboarding / rate-card / category research / SOW packs must not use
+    # MSA renewal contract-scope retrieval. SOW runs use semantic search over sow/contract/policy.
     if has_contract_scope and workflow not in {
         "supplier_assessment",
         "procurement",
         "analysis",
         "research",
+        "sow_intelligence",
     }:
         matches, metadata_filter_warning = _contract_metadata_search(
             adapter,
@@ -661,7 +686,7 @@ def execute_retrieval(
             job.trusted_sources,
             extra_metadata_filter=vendor_metadata_filter,
         )
-        if workflow in {"supplier_assessment", "procurement", "analysis"}:
+        if workflow in {"supplier_assessment", "procurement", "analysis", "sow_intelligence"}:
             matches = _prefer_document_types(
                 matches,
                 retrieval_hints.get("documentTypes"),
