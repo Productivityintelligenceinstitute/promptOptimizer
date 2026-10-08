@@ -162,7 +162,7 @@ def update_job(
         payload["execution_model"] = model
         payload["llm_key_id"] = key_id
     merged_tools = payload.get("tool_permissions", job.tool_permissions)
-    if "tool_permissions" in payload or merged_tools:
+    if "tool_permissions" in payload:
         validate_tool_permissions_keys(db, owner, merged_tools)
     ensure_job_version_seed(db, job, created_by=owner)
     for key, value in payload.items():
