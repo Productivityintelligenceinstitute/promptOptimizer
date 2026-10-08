@@ -132,6 +132,13 @@ CATEGORY_TOOL_PERMISSIONS = [
     _perm("docx-generate", read_only=False),
 ]
 
+# SOW intelligence: document integrity on the SOW and governing agreement.
+# No web-search — public pages invent commercial facts that look cited.
+SOW_TOOL_PERMISSIONS = [
+    _perm("doc-reader", read_only=True),
+    _perm("docx-generate", read_only=False),
+]
+
 TOOL_PROFILE_UNION = [
     _perm("doc-reader", read_only=True),
     _perm("web-search", read_only=True),
@@ -424,6 +431,90 @@ _CATEGORY_JOB_NAMES = (
     "Category Strategy Intelligence Briefing (Scorecard)",
 )
 
+SOW_OUTPUT_FULL = """# Executive Summary
+## Classification
+## Executive Finding
+## Top Issues
+## Deliverable Integrity
+## Commercial Integrity
+## Waste Profile
+## MSA Boundary
+## Prior SOW Comparison
+## Questions Before Signature
+## Human Decisions
+## Disposition
+## Evidence Gaps"""
+
+SOW_OUTPUT_EXECUTIVE = """## Classification:
+## Executive Finding:
+## Top Issues:
+## Disposition:"""
+
+SOW_OUTPUT_SCORECARD = """{
+  "classification": "Staffing|SOW-T&M|Deliverable|Managed Service|Ambiguous",
+  "classificationConfidence": "low|medium|high",
+  "executiveFinding": "",
+  "topIssues": [
+    {
+      "title": "",
+      "issueType": "ambiguity|dependency|payment|performance|waste|classification",
+      "evidence": "",
+      "impact": ""
+    }
+  ],
+  "deliverableIntegrity": [],
+  "commercialIntegrity": "",
+  "wasteProfile": [],
+  "questionsBeforeSignature": [],
+  "humanDecisions": [],
+  "disposition": "Proceed|Proceed with Clarification|Redesign Commercial Model|Escalate|Do Not Approve Yet",
+  "evidenceGaps": []
+}"""
+
+SOW_SEMANTIC_BLUEPRINT = (
+    "CLASSIFY → PARSE → TEST → COMPARE → DECIDE. "
+    "Classify the engagement as Staffing, SOW-T&M, Deliverable, Managed Service, or Ambiguous. "
+    "Test each deliverable for 5W1H, supplier control, dependencies, performance cadence, and payment alignment. "
+    "Compare the draft to the governing MSA and any prior SOW. "
+    "Assign exactly one disposition: Proceed, Proceed with Clarification, Redesign Commercial Model, "
+    "Escalate, or Do Not Approve Yet. "
+    "Cite only with [source:documentId] from Retrieved Context. "
+    "Do not invent fees, owners, dates, acceptance tests, or legal conclusions."
+)
+
+SOW_STABLE_INSTRUCTIONS = """You are preparing an SOW Intelligence decision pack for procurement.
+The object of analysis is the draft or current Statement of Work, read against the business intake and any governing MSA, prior SOW, rate card, invoice history, or change requests in Retrieved Context or the User request.
+
+Rules:
+1. Never invent fees, rate increases, owners, dates, acceptance tests, service levels, invoice patterns, change-request causes, or legal conclusions. Facts in the User request and facts in Retrieved Context are both usable. If a fact is in neither, write "Not available in retrieved vector context". When a fee or percentage is in a source, repeat that figure (do not paraphrase "GBP 48,000" down to "a monthly fee"). The business intake in the User request is buyer intent — do not list that intent as missing.
+2. Classify the engagement as exactly one of: Staffing, SOW-T&M, Deliverable, Managed Service, or Ambiguous. State confidence and the evidence.
+   - Staffing: the customer directs named people day to day.
+   - SOW-T&M: the supplier's method or ecosystem matters, but billing is time and materials.
+   - Deliverable: the supplier controls a defined outcome with acceptance.
+   - Managed Service: a recurring measurable service with a stated level and review cadence.
+   - Ambiguous: the title and the commercial mechanics disagree, or the evidence is not enough to classify.
+3. Do not let the SOW title decide the class. If the customer directs the work, classify Staffing even when the title says deliverable. If billing is time and materials but the supplier ecosystem is material, classify SOW-T&M, not Staffing.
+4. For each named deliverable, test 5W1H (who, what, when, where, why, how accepted), whether the supplier controls execution, whether dependencies have an owner and a timing, whether performance has a goal / current / forecast cadence, and whether payment matches the service. A weak 5W1H means the item is not deliverable-ready. Say so and write the missing-information question.
+5. Payment integrity: a monthly invoice that is not tied to acceptance, a unit, or a measurable managed service is a capacity-style payment. Flag it. A recurring payment is acceptable only when the SOW states a measurable managed service. A price increase needs a controllable-cost or external-force explanation plus a value case. If that explanation is absent, flag it. Do not invent the explanation.
+6. Run a DOWNTIME waste pass only on evidence: defects (ambiguous scope that will cause change requests), overproduction (extra process or unused reports), waiting (approvals with no owner), non-utilised talent, transport (unnecessary handoffs), inventory (unaccepted work in progress), motion (rework), extra processing (legal terms copied from the MSA). Rank only findings the draft actually supports.
+7. If the SOW repeats liability, confidentiality, or governing-law terms already in the MSA, name those topics and cite both the SOW id and the MSA id. Do not interpret enforceability. Write that counsel decides.
+8. When a prior SOW is in Retrieved Context, state how this draft differs on acceptance and payment (for example milestone acceptance versus a monthly capacity fee) and cite that prior SOW id. Do not claim a comparison document is missing when it is in context.
+9. Use exactly one disposition: Proceed, Proceed with Clarification, Redesign Commercial Model, Escalate, or Do Not Approve Yet.
+   - Proceed: classification is stable and deliverables pass the tests above.
+   - Proceed with Clarification: the model can stand after specific questions are answered.
+   - Redesign Commercial Model: the title and the payment or control model do not match.
+   - Escalate: evidence conflicts and a human owner must resolve it.
+   - Do Not Approve Yet: the draft is not governable (missing acceptance, control, or payment alignment).
+10. Human decisions name a role only when the evidence supports it (Procurement, Legal, Business owner, Finance, Security / Architecture). Do not assign a binding commercial or legal decision to the model.
+11. Citations (mandatory): every material factual claim must use exactly `[source:<documentId>]` where `<documentId>` appears in Retrieved Context (examples: NW-SOW-2026-014, NW-MSA-2025-003, NW-SOW-2025-008). Never invent citation tags. Web search is not available. Do not use public pages to fill fees, owners, or clauses.
+12. If a workflow canvas block is present in these instructions, treat filled Trigger, Inputs, Human Decision, and End State lines as the operator's design for this run. They do not override retrieved evidence."""
+
+_SOW_JOB_NAMES = (
+    "SOW Intelligence",
+    "SOW Intelligence (Executive)",
+    "SOW Intelligence (Scorecard)",
+)
+
 
 def _glossary_content() -> dict[str, Any]:
     terms = [
@@ -482,6 +573,32 @@ def _category_glossary_terms() -> list[dict[str, Any]]:
     ]
 
 
+def _sow_glossary_terms() -> list[dict[str, Any]]:
+    """SOW pack glossary — commercial model language, not a required MSA clause list."""
+    terms = [
+        ("Staffing", "Customer directs named people day to day. Not a fixed-deliverable engagement."),
+        ("SOW-T&M", "Supplier method or ecosystem matters, but billing is time and materials."),
+        ("Deliverable", "Supplier controls a defined outcome with an acceptance test."),
+        ("Managed Service", "Recurring measurable service with a stated level and review cadence."),
+        ("Ambiguous", "The SOW title and the control or payment mechanics do not agree."),
+        ("5W1H", "Who, what, when, where, why, and how a deliverable is accepted."),
+        ("payment integrity", "Whether the invoice trigger matches acceptance, units, or a measurable service."),
+        ("capacity model", "A monthly fee for assigned people that is not tied to a completed deliverable."),
+        ("DOWNTIME", "Waste scan: defects, overproduction, waiting, non-utilised talent, transport, inventory, motion, extra processing."),
+        ("disposition", "One of Proceed, Proceed with Clarification, Redesign Commercial Model, Escalate, or Do Not Approve Yet."),
+    ]
+    return [
+        {
+            "id": term.lower().replace(" ", "_").replace("&", "and").replace("-", "_"),
+            "term": term,
+            "definition": definition,
+            "synonyms": [],
+            "required": False,
+        }
+        for term, definition in terms
+    ]
+
+
 def _validation_contract_content() -> dict[str, Any]:
     return {
         "rules": [
@@ -528,6 +645,7 @@ def _tool_profile_content() -> dict[str, Any]:
             "procurement": [p["toolId"] for p in ONBOARDING_TOOL_PERMISSIONS],
             "analysis": [p["toolId"] for p in RATE_CARD_TOOL_PERMISSIONS],
             "research": [p["toolId"] for p in CATEGORY_TOOL_PERMISSIONS],
+            "sow_intelligence": [p["toolId"] for p in SOW_TOOL_PERMISSIONS],
         },
         "toolPermissions": TOOL_PROFILE_UNION,
     }
@@ -806,6 +924,36 @@ def _category_role_scorecard() -> str:
     )
 
 
+def _sow_role_full() -> str:
+    return (
+        "You are a senior procurement commercial advisor reviewing a Statement of Work before signature. "
+        "Classify the commercial model, test whether deliverables are governable, and say what must change. "
+        "Use only Proceed, Proceed with Clarification, Redesign Commercial Model, Escalate, or Do Not Approve Yet. "
+        "Cite [source:documentId] from retrieved SOW, MSA, and prior-SOW evidence. "
+        "Do not make a binding legal or commercial decision, and do not invent fees, owners, or dates."
+    )
+
+
+def _sow_role_executive() -> str:
+    return (
+        "You are briefing a procurement lead who has a few minutes before a signature meeting. "
+        "Lead with classification, the executive finding, the top issues, and one disposition. "
+        "Keep the brief short. Do not restate the MSA or dump clause text. "
+        "Do not invent fees, owners, dates, or legal conclusions."
+    )
+
+
+def _sow_role_scorecard() -> str:
+    return (
+        "You are producing a structured SOW decision scorecard. "
+        "Return only JSON matching the output template. "
+        "Classification must be Staffing, SOW-T&M, Deliverable, Managed Service, or Ambiguous. "
+        "Disposition must be Proceed, Proceed with Clarification, Redesign Commercial Model, "
+        "Escalate, or Do Not Approve Yet. "
+        "Do not invent fees, owners, dates, or legal conclusions."
+    )
+
+
 RATE_CARD_STABLE_INSTRUCTIONS = (
     "Normalize the supplied rate card data using the job taxonomy.\n"
     "- Use rate card data from EVERY block in Retrieved Context (all vendors, all roles)\n"
@@ -940,6 +1088,12 @@ def _job_definitions() -> list[dict[str, Any]]:
         "decision-owner timings not in retrieved context; (5) overstated guidance (for example "
         "treating consider/balance as a mandate, or marking every issue ACT); "
         "(6) fake citation tags such as [project_…] or references to 'project memory'."
+    )
+    sow_risk = (
+        "Explicitly flag: (1) a title that disagrees with who directs the work or how payment is triggered; "
+        "(2) deliverables that fail 5W1H or have no supplier control; (3) monthly or capacity-style fees "
+        "that are not a measurable managed service; (4) price increases with no cost evidence; "
+        "(5) legal terms copied from the MSA; (6) invented fees, owners, dates, or citation tags."
     )
 
     return [
@@ -1247,6 +1401,72 @@ def _job_definitions() -> list[dict[str, Any]]:
             "family": "category_strategy",
             **_analysis_job_fields(),
         },
+        {
+            "name": "SOW Intelligence",
+            "description": (
+                "Decision pack for a draft or current Statement of Work: classify the commercial model, "
+                "test whether deliverables are governable, and state the disposition before signature. "
+                "Needs: the SOW and the business intake in the User request or job knowledge base. "
+                "Strongly preferred: the governing MSA. Optional: a prior SOW, rate card, or change history."
+            ),
+            "workflow_type": "sow_intelligence",
+            "goal": (
+                "Tell procurement whether this SOW is correctly classified, where ambiguity or payment "
+                "misalignment sits, and whether to proceed, clarify, redesign, escalate, or hold."
+            ),
+            "semantic_blueprint": SOW_SEMANTIC_BLUEPRINT,
+            "role_configuration": _sow_role_full(),
+            "stable_instructions": SOW_STABLE_INSTRUCTIONS,
+            "output_template": SOW_OUTPUT_FULL,
+            "tool_permissions": SOW_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=True, format_severity="error", high_risk_description=sow_risk
+            ),
+            "persona": "full",
+            "family": "sow_intelligence",
+            **_analysis_job_fields(),
+        },
+        {
+            "name": "SOW Intelligence (Executive)",
+            "description": (
+                "Short SOW decision brief: classification, executive finding, top issues, and one disposition. "
+                "Same method as the full pack, shorter packaging. "
+                "Needs: the SOW and business intake in the User request or job knowledge base."
+            ),
+            "workflow_type": "sow_intelligence",
+            "goal": "Deliver a signature-meeting brief a procurement lead can act on.",
+            "semantic_blueprint": SOW_SEMANTIC_BLUEPRINT,
+            "role_configuration": _sow_role_executive(),
+            "stable_instructions": SOW_STABLE_INSTRUCTIONS,
+            "output_template": SOW_OUTPUT_EXECUTIVE,
+            "tool_permissions": SOW_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=False, format_severity="error", high_risk_description=sow_risk
+            ),
+            "persona": "executive",
+            "family": "sow_intelligence",
+            **_analysis_job_fields(),
+        },
+        {
+            "name": "SOW Intelligence (Scorecard)",
+            "description": (
+                "Structured JSON SOW decision scorecard for classification, payment integrity, and disposition. "
+                "Needs: the SOW and business intake in the User request or job knowledge base."
+            ),
+            "workflow_type": "sow_intelligence",
+            "goal": "Return a structured SOW Intelligence scorecard.",
+            "semantic_blueprint": SOW_SEMANTIC_BLUEPRINT,
+            "role_configuration": _sow_role_scorecard(),
+            "stable_instructions": SOW_STABLE_INSTRUCTIONS,
+            "output_template": SOW_OUTPUT_SCORECARD,
+            "tool_permissions": SOW_TOOL_PERMISSIONS,
+            "validation_rules": _shared_base_rules(
+                citation=False, format_severity="error", high_risk_description=sow_risk
+            ),
+            "persona": "scorecard",
+            "family": "sow_intelligence",
+            **_analysis_job_fields(),
+        },
     ]
 
 
@@ -1427,6 +1647,8 @@ def _seed_jobs(db, assets_by_name: dict[str, ContextAssetModel]) -> tuple[list[s
         )
         if job_def.get("family") == "category_strategy":
             job.glossary_terms = _category_glossary_terms()
+        elif job_def.get("family") == "sow_intelligence":
+            job.glossary_terms = _sow_glossary_terms()
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -1863,6 +2085,11 @@ def _sync_flagship_system_templates(db: Session) -> list[str]:
             if list(job.glossary_terms or []) != target_glossary:
                 job.glossary_terms = target_glossary
                 changed = True
+        elif job_def.get("family") == "sow_intelligence":
+            target_glossary = _sow_glossary_terms()
+            if list(job.glossary_terms or []) != target_glossary:
+                job.glossary_terms = target_glossary
+                changed = True
 
         if changed:
             db.add(job)
@@ -1945,6 +2172,77 @@ def _sync_category_strategy_instantiated_jobs(db: Session) -> list[str]:
     return updated
 
 
+def _sync_sow_intelligence_instantiated_jobs(db: Session) -> list[str]:
+    """Push SOW Intelligence prompt/glossary packs onto matching instantiated (non-system) jobs."""
+    updated: list[str] = []
+    defs_by_name = {
+        job_def["name"]: job_def
+        for job_def in _job_definitions()
+        if job_def.get("family") == "sow_intelligence"
+    }
+    if not defs_by_name:
+        return updated
+
+    jobs = (
+        db.query(ContextJobModel)
+        .filter(ContextJobModel.name.in_(list(defs_by_name.keys())))
+        .filter(ContextJobModel.owner != SYSTEM_OWNER)
+        .all()
+    )
+    for job in jobs:
+        job_def = defs_by_name.get(job.name or "")
+        if not job_def:
+            continue
+        changed = False
+        target_instructions = str(job_def["stable_instructions"])
+        if (job.stable_instructions or "").strip() != target_instructions.strip():
+            job.stable_instructions = target_instructions
+            changed = True
+        target_blueprint = job_def.get("semantic_blueprint")
+        if target_blueprint is not None and (job.semantic_blueprint or "").strip() != str(target_blueprint).strip():
+            job.semantic_blueprint = str(target_blueprint)
+            changed = True
+        target_role = str(job_def["role_configuration"])
+        if (job.role_configuration or "").strip() != target_role.strip():
+            job.role_configuration = target_role
+            changed = True
+        target_glossary = _sow_glossary_terms()
+        if list(job.glossary_terms or []) != target_glossary:
+            job.glossary_terms = target_glossary
+            changed = True
+        desired_rules = [dict(r) for r in (job_def.get("validation_rules") or []) if isinstance(r, dict)]
+        policy_rules = [
+            rule
+            for rule in (job.validation_rules or [])
+            if isinstance(rule, dict) and str(rule.get("id") or "").startswith("policy_")
+        ]
+        next_rules = desired_rules + policy_rules
+
+        def _sig(rules: list[Any]) -> list[tuple[str, str, str]]:
+            out: list[tuple[str, str, str]] = []
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                out.append(
+                    (
+                        str(rule.get("id") or ""),
+                        str(rule.get("type") or ""),
+                        str(rule.get("description") or ""),
+                    )
+                )
+            return sorted(out)
+
+        if _sig(list(job.validation_rules or [])) != _sig(next_rules):
+            job.validation_rules = next_rules
+            changed = True
+        if changed:
+            db.add(job)
+            updated.append(f"{job.name}:{job.owner}")
+    if updated:
+        db.commit()
+    return updated
+
+
 def seed_procurement_templates(db: Session) -> None:
     """Ensure shared procurement assets and system job templates exist."""
     created_assets, skipped_assets = _seed_assets(db)
@@ -1969,6 +2267,7 @@ def seed_procurement_templates(db: Session) -> None:
     patched_rate_card = _patch_rate_card_templates(db)
     synced_flagship = _sync_flagship_system_templates(db)
     synced_category_jobs = _sync_category_strategy_instantiated_jobs(db)
+    synced_sow_jobs = _sync_sow_intelligence_instantiated_jobs(db)
     patched_procurement = _patch_procurement_validation_and_retrieval(db)
     patched_chains = patch_procurement_chain_configs(db)
 
@@ -1990,6 +2289,11 @@ def seed_procurement_templates(db: Session) -> None:
         logger.info(
             "Synced Category Strategy instantiated jobs: %s",
             ", ".join(synced_category_jobs),
+        )
+    if synced_sow_jobs:
+        logger.info(
+            "Synced SOW Intelligence instantiated jobs: %s",
+            ", ".join(synced_sow_jobs),
         )
     if patched_procurement:
         logger.info(

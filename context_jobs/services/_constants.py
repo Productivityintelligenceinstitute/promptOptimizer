@@ -46,6 +46,7 @@ VALID_WORKFLOW_TYPES = frozenset({
     "contract_review",
     "supplier_assessment",
     "contract_amendment",
+    "sow_intelligence",
 })
 
 INTERNAL_WORKFLOW_TYPES = frozenset({"contract_amendment"})

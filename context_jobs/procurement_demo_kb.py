@@ -25,7 +25,7 @@ DEMO_KB_DIR = Path(__file__).resolve().parent.parent / "docs" / "demo_kb"
 DEFAULT_TEMPLATE_NAME = "Contract Review & Renewal"
 
 # Bump when demo_kb_documents() gains files. Already-seeded owners ingest only the delta.
-DEMO_KB_BUNDLE_VERSION = 3
+DEMO_KB_BUNDLE_VERSION = 4
 # Document ids introduced in each bundle version (for delta ingest).
 _DEMO_KB_DELTA_BY_VERSION: dict[int, frozenset[str]] = {
     2: frozenset({"demo-job-taxonomy"}),
@@ -34,6 +34,13 @@ _DEMO_KB_DELTA_BY_VERSION: dict[int, frozenset[str]] = {
             "demo-category-strategy-cloud-2026",
             "demo-category-priorities-q3-2026",
             "demo-category-signals-sep-2026",
+        }
+    ),
+    4: frozenset(
+        {
+            "demo-sow-northwind-msa-2025",
+            "demo-sow-northwind-prior-2025",
+            "demo-sow-northwind-draft-2026",
         }
     ),
 }
@@ -149,6 +156,39 @@ def demo_kb_documents() -> list[dict[str, Any]]:
                 "documentType": "category_signals",
                 "category": "Cloud Infrastructure",
                 "asOfDate": "2026-09-22",
+            },
+        },
+        {
+            "id": "demo-sow-northwind-msa-2025",
+            "text": _read_text("sow_northwind_msa_2025.txt"),
+            "metadata": {
+                "title": "Northwind Digital MSA 2025",
+                "documentType": "contract",
+                "contractId": "NW-MSA-2025-003",
+                "vendor": "Harborline Consulting Ltd",
+                "customer": "Northwind Digital Ltd",
+            },
+        },
+        {
+            "id": "demo-sow-northwind-prior-2025",
+            "text": _read_text("sow_northwind_prior_2025.txt"),
+            "metadata": {
+                "title": "Northwind Billing Export SOW 2025",
+                "documentType": "sow",
+                "contractId": "NW-SOW-2025-008",
+                "vendor": "Harborline Consulting Ltd",
+                "customer": "Northwind Digital Ltd",
+            },
+        },
+        {
+            "id": "demo-sow-northwind-draft-2026",
+            "text": _read_text("sow_northwind_draft_2026.txt"),
+            "metadata": {
+                "title": "Northwind Cloud Landing Zone SOW Draft 2026",
+                "documentType": "sow",
+                "contractId": "NW-SOW-2026-014",
+                "vendor": "Harborline Consulting Ltd",
+                "customer": "Northwind Digital Ltd",
             },
         },
     ]
