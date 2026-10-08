@@ -1,0 +1,34 @@
+STATEMENT OF WORK (DRAFT)
+Document ID: NW-SOW-2026-014
+Title: Cloud landing zone — deliverable engagement
+Customer: Northwind Digital Ltd
+Supplier: Harborline Consulting Ltd
+Governing agreement: NW-MSA-2025-003
+Status: Draft, not signed
+Date of draft: 12 September 2026
+
+Business intake recorded by Procurement on 12 September 2026:
+Northwind wants a finished cloud landing zone that Product can use, with a target of 30 June 2026 for first production workload. The buyer does not want a staff bench. The buyer asked Procurement to confirm the commercial model before signature.
+
+1. Services
+Harborline will provide four named consultants: a cloud architect, two engineers, and a project coordinator. Northwind will direct their day-to-day work, set their working hours, and may replace any named person on five days' notice.
+
+2. Deliverable
+Deliverable name: Cloud landing zone.
+Description: Harborline will help Northwind with cloud setup.
+No acceptance test, no accepting owner, no delivery date, and no statement of what "done" means are included in this draft.
+
+3. Dependency
+Security architecture approval is required before build. The draft does not name an owner, a date, or what happens if approval is late.
+
+4. Charges
+Harborline will invoice GBP 48,000 on the last business day of each month while the consultants are assigned. The invoice is not tied to acceptance of a deliverable or to a measured unit of service.
+Harborline also requests a 12 percent increase on the 2025 rate card. The draft gives no cost evidence and no explanation of an external force.
+
+5. Governing terms copied from the Master Services Agreement
+The Supplier's aggregate liability is capped at the fees paid under the applicable Statement of Work in the twelve months before the claim.
+Each party shall keep the other party's confidential information secret for three years after disclosure.
+This Statement of Work is governed by the laws of England and Wales.
+
+6. Performance
+The draft does not state a time, cost, productivity, or efficiency goal, a current baseline, or a forecast review cadence.

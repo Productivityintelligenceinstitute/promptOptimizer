@@ -1,0 +1,30 @@
+STATEMENT OF WORK
+Document ID: NW-SOW-2025-008
+Title: Billing export rebuild
+Customer: Northwind Digital Ltd
+Supplier: Harborline Consulting Ltd
+Governing agreement: NW-MSA-2025-003
+Status: Completed 18 November 2025
+Commercial model: Fixed deliverable
+
+1. Outcome
+Harborline will replace the legacy billing export with a versioned CSV export that Finance can reconcile to the general ledger without manual rekeying.
+
+2. Deliverable
+Deliverable: Billing export v2.
+What: A production CSV export of closed invoices for a selected month.
+Who produces it: Harborline delivery lead.
+Who accepts it: Northwind Finance Operations Manager.
+When: Acceptance review within 10 business days of delivery.
+Where: Northwind production billing environment.
+Why: Month-end close currently rekeys invoice totals.
+How accepted: Finance reconciles three sample months to the ledger with zero unexplained differences.
+Supplier control: Harborline controls design, build, and deployment. Northwind provides read-only data access and the acceptance review.
+
+3. Payment
+40 percent on delivery of the export to the test environment.
+60 percent on written acceptance.
+No monthly capacity fee.
+
+4. What this SOW does not do
+This Statement of Work does not restate liability, confidentiality, or governing law. Those terms stay in NW-MSA-2025-003.

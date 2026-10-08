@@ -1,0 +1,27 @@
+NORTHWIND DIGITAL MASTER SERVICES AGREEMENT
+Document ID: NW-MSA-2025-003
+Customer: Northwind Digital Ltd
+Supplier: Harborline Consulting Ltd
+Effective date: 1 March 2025
+Status: Active governing agreement
+
+1. Structure
+Each Statement of Work is governed by this Master Services Agreement. If a Statement of Work repeats a governing term already in this agreement, this agreement controls.
+
+2. Liability
+The Supplier's aggregate liability under this agreement is capped at the fees paid under the applicable Statement of Work in the twelve months before the claim. Neither party excludes liability for fraud or death or personal injury caused by negligence.
+
+3. Confidentiality
+Each party shall keep the other party's confidential information secret for three years after disclosure and use it only to perform this agreement.
+
+4. Customer direction of staff
+Where the Customer directs named individuals day to day, sets their working hours, and may replace them, the engagement is contingent staffing. It is not a fixed-deliverable engagement.
+
+5. Payment
+Fees, milestones, and invoice triggers are stated only in the applicable Statement of Work. A monthly invoice is permitted for a managed service only when the Statement of Work states a measurable recurring service, a service level, and a review cadence.
+
+6. Changes
+A change to scope, date, or price requires a written change request. A change request caused by ambiguous original scope is treated as a defect of the Statement of Work, not as a new requirement, until the parties agree otherwise.
+
+7. Governing law
+This agreement is governed by the laws of England and Wales.
