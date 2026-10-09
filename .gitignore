@@ -1,5 +1,4 @@
 # Virtual environments
-.env
 myenv
 venv
 .venv/
@@ -81,3 +80,5 @@ PGVECTOR_CONFIGURATION_TESTING_GUIDE.md
 QDRANT_CONFIGURATION_TESTING_GUIDE.md
 TESTING_WITH_SEEDED_DATA.md
 TRIAL_TESTING_GUIDE.md
+config.bat
+node_modules

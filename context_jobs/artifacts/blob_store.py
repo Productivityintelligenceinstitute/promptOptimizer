@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 MAX_BLOB_BYTES = 25 * 1024 * 1024
 REVISED_CONTRACT_FILENAME = "revised-contract.docx"
+CATEGORY_BRIEFING_FILENAME = "category-strategy-briefing.docx"
 
 _MIME_BY_SUFFIX = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -44,6 +45,8 @@ def purpose_for_path(relative_path: str, *, workflow_type: str | None = None) ->
     name = Path(relative_path or "").name.lower()
     if name == REVISED_CONTRACT_FILENAME or name.startswith("revised-contract"):
         return "revised_contract"
+    if name == CATEGORY_BRIEFING_FILENAME or name.startswith("category-strategy-briefing"):
+        return "category_briefing"
     if (workflow_type or "").lower() == "contract_amendment" and name.endswith(".docx"):
         return "revised_contract"
     return "artifact"
