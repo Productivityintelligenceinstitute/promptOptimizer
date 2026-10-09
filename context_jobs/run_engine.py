@@ -306,6 +306,9 @@ async def _execute_run_async(run_id: UUID) -> None:
                 state = run.state
                 outcome = run.outcome
 
+            if run.state in ("completed", "completed_with_warnings"):
+                _attach_category_briefing(db, run, job, response.content or "")
+
             if state == "escalated":
                 cj_audit.write_audit_event(
                     db,
@@ -537,6 +540,34 @@ def _finalize_running_step_logs(run_row: JobRunModel) -> None:
         return
     run_row.step_logs = logs
     flag_modified(run_row, "step_logs")
+
+
+def _attach_category_briefing(db: Session, run: JobRunModel, job: ContextJobModel, output_text: str) -> None:
+    """Save a Word briefing when a Category Strategy run finishes. Failures stay off the run result."""
+    from context_jobs.artifacts.blob_store import persist_run_artifact_bytes
+    from context_jobs.artifacts.category_briefing_docx import (
+        BRIEFING_FILENAME,
+        build_category_briefing_docx,
+        is_category_strategy_job,
+    )
+
+    if not is_category_strategy_job(job):
+        return
+    if not (output_text or "").strip():
+        return
+    try:
+        content = build_category_briefing_docx(output_text, job_name=job.name or "")
+        persist_run_artifact_bytes(
+            job.owner or "",
+            run.id,
+            BRIEFING_FILENAME,
+            content,
+            tool_id="category-briefing",
+            workflow_type=job.workflow_type,
+            db=db,
+        )
+    except Exception:
+        logger.exception("Category briefing document failed for run %s", run.id)
 
 
 def _post_validate_amendment(db: Session, run: JobRunModel, job: ContextJobModel) -> None:
