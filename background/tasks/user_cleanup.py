@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import database
 from schemas.user_model import UserModel
+from schemas.context_jobs_model import WorkspaceMemberModel, WorkspaceModel
 from schemas.subscription_model import SubscriptionsModel
 from repositories.daily_usage import UsageRepository
 
@@ -35,11 +36,25 @@ def _cleanup_once(db: Session, inactive_days_threshold: int = 90) -> int:
         .all()
     )
 
+    company_member_uids = {
+        uid
+        for (uid,) in db.query(WorkspaceMemberModel.user_id)
+        .join(WorkspaceModel, WorkspaceModel.id == WorkspaceMemberModel.workspace_id)
+        .filter(WorkspaceModel.kind == "company", WorkspaceMemberModel.status == "active")
+        .all()
+    }
+
     deleted_count = 0
 
     for user in candidates:
         # Never soft-delete admin users
         if user.role and str(user.role).lower() == "admin":
+            continue
+
+        # Company members are billed through their company (often with no personal
+        # plan at all); keep them even if the company's access lapses, so a renewal
+        # restores the same accounts.
+        if user.firebase_uid and user.firebase_uid in company_member_uids:
             continue
 
         # Find the most recent subscription for this user (any status)

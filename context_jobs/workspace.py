@@ -1,143 +1,89 @@
-"""Workspace model and role-based access control."""
+"""Workspace lookup by data owner key, personal workspace provisioning, and allowlists.
+
+Every owner-scoped row stores the workspace's partition key in ``owner``: a Firebase
+UID for a personal workspace, the ``org_<hex>`` workspace id for a company. The
+helpers here map an owner key back to its workspace. Role checks live in
+``context_jobs.tenancy`` (capability matrix), not here.
+"""
 
 from __future__ import annotations
 
 from typing import Optional
-from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from context_jobs.tenancy.keys import is_company_owner_key, personal_workspace_id
+from context_jobs.tenancy.plans import KIND_PERSONAL, STATUS_ACTIVE
+from context_jobs.tenancy.roles import Role
 from schemas.context_jobs_model import ContextJobModel, WorkspaceMemberModel, WorkspaceModel
 
-ROLE_HIERARCHY = {"viewer": 1, "editor": 2, "admin": 3, "owner": 4}
-
-DEFAULT_WORKSPACE_SUFFIX = "_default"
+PERSONAL_WORKSPACE_NAME = "Personal workspace"
 
 
-def default_workspace_id(user_id: str) -> str:
-    return f"ws_{user_id}{DEFAULT_WORKSPACE_SUFFIX}"
+def default_workspace_id(owner: str) -> str:
+    """Workspace id for a data owner key."""
+    if is_company_owner_key(owner):
+        return owner
+    return personal_workspace_id(owner)
 
 
-def ensure_default_workspace(db: Session, user_id: str) -> WorkspaceModel:
-    ws_id = default_workspace_id(user_id)
-    # Check if workspace already exists
-    ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == ws_id).first()
-    if ws:
-        return ws
+def ensure_personal_workspace(db: Session, firebase_uid: str) -> WorkspaceModel:
+    """Get or create the user's personal workspace and their Tenant Admin membership."""
+    ws_id = personal_workspace_id(firebase_uid)
+    ws = db.get(WorkspaceModel, ws_id)
+    if ws is None:
+        try:
+            ws = WorkspaceModel(
+                id=ws_id,
+                name=PERSONAL_WORKSPACE_NAME,
+                owner=firebase_uid,
+                kind=KIND_PERSONAL,
+                status=STATUS_ACTIVE,
+            )
+            db.add(ws)
+            db.commit()
+        except IntegrityError:
+            # Concurrent first request created it.
+            db.rollback()
+        ws = db.get(WorkspaceModel, ws_id)
 
-    # Create and commit workspace first to ensure it exists in the database
-    ws = WorkspaceModel(id=ws_id, name=f"{user_id}'s workspace", owner=user_id)
-    db.add(ws)
-    db.commit()
-    db.refresh(ws)
-
-    # Now create the member - workspace is guaranteed to exist
-    try:
-        member = WorkspaceMemberModel(
-            workspace_id=ws_id,
-            user_id=user_id,
-            role="owner",
+    has_member = (
+        db.query(WorkspaceMemberModel.id)
+        .filter(
+            WorkspaceMemberModel.workspace_id == ws_id,
+            WorkspaceMemberModel.user_id == firebase_uid,
         )
-        db.add(member)
-        db.commit()
-    except Exception:
-        db.rollback()
-        # If member creation fails, workspace exists but member doesn't - this is ok for idempotency
-        # Just return the workspace
-        pass
-
+        .first()
+    )
+    if not has_member:
+        try:
+            db.add(
+                WorkspaceMemberModel(
+                    workspace_id=ws_id,
+                    user_id=firebase_uid,
+                    role=Role.TENANT_ADMIN.value,
+                    status=STATUS_ACTIVE,
+                )
+            )
+            db.commit()
+        except IntegrityError:
+            db.rollback()
     return ws
 
 
-def get_member_role(db: Session, workspace_id: str, user_id: str) -> Optional[str]:
-    row = (
-        db.query(WorkspaceMemberModel)
-        .filter(
-            WorkspaceMemberModel.workspace_id == workspace_id,
-            WorkspaceMemberModel.user_id == user_id,
-        )
-        .first()
-    )
-    return row.role if row else None
-
-
-def require_role(db: Session, workspace_id: str, user_id: str, min_role: str) -> str:
-    role = get_member_role(db, workspace_id, user_id)
-    if not role:
-        # Fallback: user owns jobs directly without workspace membership
-        if workspace_id == default_workspace_id(user_id) or workspace_id == "default":
-            # Auto-create default workspace if it doesn't exist
-            ensure_default_workspace(db, user_id)
-            return "owner"
-        raise ValueError("Access denied: not a workspace member")
-    if ROLE_HIERARCHY.get(role, 0) < ROLE_HIERARCHY.get(min_role, 99):
-        raise ValueError(f"Access denied: requires {min_role} role")
-    return role
-
-
-def can_read(db: Session, workspace_id: str, user_id: str) -> bool:
-    try:
-        require_role(db, workspace_id, user_id, "viewer")
-        return True
-    except ValueError:
-        return False
-
-
-def can_write(db: Session, workspace_id: str, user_id: str) -> bool:
-    try:
-        require_role(db, workspace_id, user_id, "editor")
-        return True
-    except ValueError:
-        return False
-
-
-def can_admin(db: Session, workspace_id: str, user_id: str) -> bool:
-    try:
-        require_role(db, workspace_id, user_id, "admin")
-        return True
-    except ValueError:
-        return False
-
-
-def add_workspace_member(
-    db: Session,
-    workspace_id: str,
-    actor: str,
-    user_id: str,
-    role: str,
-) -> WorkspaceMemberModel:
-    require_role(db, workspace_id, actor, "admin")
-    if role not in ROLE_HIERARCHY:
-        raise ValueError(f"Invalid role {role!r}")
-
-    # Verify workspace exists before adding member
-    ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
-    if not ws:
-        raise ValueError(f"Workspace {workspace_id!r} does not exist")
-
-    existing = (
-        db.query(WorkspaceMemberModel)
-        .filter(
-            WorkspaceMemberModel.workspace_id == workspace_id,
-            WorkspaceMemberModel.user_id == user_id,
-        )
-        .first()
-    )
-    if existing:
-        existing.role = role
-        db.add(existing)
-        db.commit()
-        db.refresh(existing)
-        return existing
-    row = WorkspaceMemberModel(workspace_id=workspace_id, user_id=user_id, role=role)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
+def ensure_default_workspace(db: Session, owner: str) -> WorkspaceModel:
+    """Workspace that owns rows keyed by ``owner`` (provisioned for personal owners)."""
+    if is_company_owner_key(owner):
+        ws = db.get(WorkspaceModel, owner)
+        if ws is None:
+            raise ValueError("Workspace not found")
+        return ws
+    return ensure_personal_workspace(db, owner)
 
 
 def get_allowlist(db: Session, workspace_id: str) -> dict:
-    ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+    ws = db.get(WorkspaceModel, workspace_id)
     if not ws:
         return {"tools": [], "sources": []}
     return {
@@ -149,12 +95,11 @@ def get_allowlist(db: Session, workspace_id: str) -> dict:
 def update_allowlist(
     db: Session,
     workspace_id: str,
-    actor: str,
     tools: Optional[list] = None,
     sources: Optional[list] = None,
 ) -> dict:
-    require_role(db, workspace_id, actor, "admin")
-    ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+    """Caller must already hold Capability.SETTINGS_MANAGE on ``workspace_id``."""
+    ws = db.get(WorkspaceModel, workspace_id)
     if not ws:
         raise ValueError("Workspace not found")
     if tools is not None:

@@ -12,7 +12,7 @@ import uuid
 import httpx
 from fastapi.testclient import TestClient
 
-from context_jobs.auth import get_context_jobs_owner_with_access
+from dependencies.auth import verify_firebase_token
 from context_jobs.clm.mock_server import (
     COUPA_CLIENT_ID,
     COUPA_CLIENT_SECRET,
@@ -74,7 +74,8 @@ def _ensure_job() -> str:
 
 def main() -> int:
     _require_mock()
-    app.dependency_overrides[get_context_jobs_owner_with_access] = _owner
+    # Real workspace resolution runs; only Firebase token verification is replaced.
+    app.dependency_overrides[verify_firebase_token] = lambda: {"uid": _owner()}
     results: list[tuple[str, bool, str]] = []
 
     with TestClient(app) as client:

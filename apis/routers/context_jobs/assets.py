@@ -3,7 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, owner_with
+from context_jobs.tenancy.roles import Capability
 from database import database
 from context_jobs import schemas as cj_schemas
 from context_jobs import services as cj_services
@@ -27,7 +28,7 @@ async def list_assets(
 )
 async def create_asset(
     payload: cj_schemas.ContextAssetCreate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ):
     return cj_services.create_asset(db, owner, payload)
@@ -37,10 +38,10 @@ async def create_asset(
 async def update_asset(
     asset_id: UUID,
     payload: cj_schemas.ContextAssetUpdate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
-    asset = cj_services.get_asset(db, asset_id, owner)
+    asset = cj_services.get_owned_asset(db, asset_id, owner)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     return cj_services.update_asset(db, asset, payload)
@@ -49,10 +50,10 @@ async def update_asset(
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset(
     asset_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
-    asset = cj_services.get_asset(db, asset_id, owner)
+    asset = cj_services.get_owned_asset(db, asset_id, owner)
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
     cj_services.delete_asset(db, asset)

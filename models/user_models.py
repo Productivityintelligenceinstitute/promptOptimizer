@@ -24,6 +24,14 @@ class UserResponse(BaseModel):
         None,
         description="Trial end timestamp in ISO format if the user is on a 14-day trial",
     )
+    personal_package_name: Optional[str] = Field(
+        None,
+        description="The user's own subscription package when package_name comes from a company",
+    )
+    company_access: bool = Field(
+        False,
+        description="True when an active company membership grants the effective package",
+    )
 
     class Config:
         json_schema_extra = {

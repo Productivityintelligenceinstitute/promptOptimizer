@@ -122,6 +122,18 @@ class SelectableProviderInfo(ProviderInfo):
     selectable: bool = True
 
 
+class EntitlementsWorkspace(BaseModel):
+    id: str
+    name: str
+    kind: str
+    role: str
+    role_label: str = Field(..., alias="roleLabel")
+    capabilities: list[str] = Field(default_factory=list)
+
+    class Config:
+        populate_by_name = True
+
+
 class ContextJobsEntitlementsOut(BaseModel):
     user_id: Optional[str] = Field(None, alias="userId")
     plan: Optional[str] = None
@@ -135,6 +147,8 @@ class ContextJobsEntitlementsOut(BaseModel):
     can_create_job: bool = Field(..., alias="canCreateJob")
     can_create_run: bool = Field(..., alias="canCreateRun")
     providers: list[SelectableProviderInfo] = Field(default_factory=list)
+    workspace: Optional[EntitlementsWorkspace] = None
+    procurement_templates: bool = Field(False, alias="procurementTemplates")
 
     class Config:
         populate_by_name = True

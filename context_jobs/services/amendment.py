@@ -14,6 +14,7 @@ from context_jobs.gateway.execution_limits import merge_amendment_budget
 from context_jobs.orchestrator import enqueue_run
 from context_jobs.plan_entitlements import assert_can_create_run, ensure_context_jobs_access, record_run_created
 from context_jobs.provider_key_services import resolve_llm_api_key
+from context_jobs.tenancy.request_actor import acting_user
 from context_jobs.workspace import default_workspace_id, ensure_default_workspace
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 
@@ -296,6 +297,7 @@ def start_amendment_run(
         job_version=amendment_job.version,
         workspace_id=getattr(amendment_job, "workspace_id", None) or default_workspace_id(owner),
         parent_run_id=parent_run.id,
+        triggered_by=acting_user(parent_run.triggered_by),
     )
     db.add(child)
     db.commit()

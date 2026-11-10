@@ -100,6 +100,7 @@ class ContextJobOut(ContextJobBase):
     created_at: datetime
     updated_at: datetime
     asset_ids: list[UUID] = Field(default_factory=list, alias="assetIds")
+    created_by: Optional[str] = Field(None, alias="createdBy")
 
     @model_validator(mode="before")
     @classmethod
@@ -197,6 +198,7 @@ class JobRunOut(BaseModel):
     id: UUID
     job_id: UUID = Field(..., alias="jobId")
     state: str
+    triggered_by: Optional[str] = Field(None, alias="triggeredBy")
 
     user_request: Optional[str] = Field(None, alias="userRequest")
     started_at: datetime = Field(..., alias="startedAt")
@@ -562,20 +564,6 @@ class AttachContractRequest(BaseModel):
         populate_by_name = True
 
 
-class WorkspaceMemberCreate(BaseModel):
-    user_id: str = Field(..., alias="userId")
-    role: str = "editor"
-
-    class Config:
-        populate_by_name = True
-
-
-class AllowlistUpdate(BaseModel):
-    tools: Optional[list[str]] = None
-    sources: Optional[list[str]] = None
-
-    class Config:
-        populate_by_name = True
 
 
 class AssetImportRequest(BaseModel):

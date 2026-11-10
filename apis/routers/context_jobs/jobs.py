@@ -13,7 +13,15 @@ from context_jobs.agents.execution_modes import (
     EXECUTION_MODE_SINGLE,
     VALID_EXECUTION_MODES,
 )
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import (
+    get_context_jobs_owner_with_access,
+    get_tenant_context,
+    owner_with,
+    tenant_with,
+)
+from context_jobs.tenancy.context import TenantContext
+from context_jobs.tenancy.features import procurement_templates_enabled, require_procurement_templates
+from context_jobs.tenancy.roles import Capability
 from context_jobs.errors import raise_context_jobs_http
 from context_jobs.workflow_canvas import build_workflow_canvas_workbook, parse_workflow_canvas
 from database import database
@@ -42,7 +50,7 @@ async def download_workflow_canvas_template(
 async def parse_workflow_canvas_upload(
     file: UploadFile = File(...),
     currentStableInstructions: str = Form(""),
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_CREATE)),
 ):
     """Map a filled workflow canvas onto builder fields. Does not save the job."""
     del owner
@@ -67,15 +75,28 @@ async def list_jobs(
         raise_context_jobs_http(exc)
 
 
+# Fields a locked (non-company) workspace may see: enough to render a locked card,
+# none of the expert instructions that make up the template.
+_LOCKED_TEMPLATE_FIELDS = ("id", "name", "description", "workflow_type", "status", "created_at", "updated_at")
+
+
 @router.get("/templates", response_model=list[cj_schemas.ContextJobOut])
 async def list_templates(
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
+    """System procurement templates; locked plans receive names and descriptions only."""
     try:
-        return cj_services.list_template_jobs(db, owner)
+        templates = cj_services.list_template_jobs(db, owner)
     except Exception as exc:
         raise_context_jobs_http(exc)
+    if procurement_templates_enabled(db, tenant):
+        return templates
+    return [
+        {field: getattr(template, field) for field in _LOCKED_TEMPLATE_FIELDS}
+        for template in templates
+    ]
 
 
 @router.post(
@@ -86,7 +107,7 @@ async def list_templates(
 )
 async def instantiate_template(
     template_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(tenant_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -95,7 +116,8 @@ async def instantiate_template(
     Same pattern as POST /jobs/from-prompt — persist with POST /jobs when ready.
     """
     try:
-        return cj_services.build_job_config_from_template(db, owner, template_id)
+        require_procurement_templates(db, tenant)
+        return cj_services.build_job_config_from_template(db, tenant.owner, template_id)
     except Exception as exc:
         raise_context_jobs_http(exc)
 
@@ -178,11 +200,14 @@ async def get_job_version(
 )
 async def create_job(
     payload: cj_schemas.ContextJobCreate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(tenant_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
+    """Members who can publish get a runnable job; analysts get a draft for review."""
     try:
-        return cj_services.create_job(db, owner, payload)
+        return cj_services.create_job(
+            db, tenant.owner, payload, auto_publish=tenant.can(Capability.JOBS_PUBLISH)
+        )
     except Exception as exc:
         raise_context_jobs_http(exc)
 
@@ -191,14 +216,22 @@ async def create_job(
 async def update_job(
     job_id: UUID,
     payload: cj_schemas.ContextJobUpdate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(tenant_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
-    job = cj_services.get_job(db, job_id, owner)
+    job = cj_services.get_job(db, job_id, tenant.owner)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     try:
-        return cj_services.update_job(db, owner, job, payload)
+        tenant.require_job_edit(job)
+        changes_status = (
+            "status" in payload.model_fields_set
+            and (payload.status or "").lower() != (job.status or "").lower()
+        )
+        if changes_status:
+            # Status moves (publish/archive) are publish rights, not edit rights.
+            tenant.require(Capability.JOBS_PUBLISH)
+        return cj_services.update_job(db, tenant.owner, job, payload)
     except Exception as exc:
         raise_context_jobs_http(exc)
 
@@ -210,7 +243,7 @@ async def update_job(
 )
 async def duplicate_job(
     job_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
     job = cj_services.get_job(db, job_id, owner)
@@ -226,7 +259,7 @@ async def duplicate_job(
 async def publish_job(
     job_id: UUID,
     payload: cj_schemas.JobLifecycleRequest | None = None,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_PUBLISH)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -239,7 +272,7 @@ async def publish_job(
 async def archive_job(
     job_id: UUID,
     payload: cj_schemas.JobLifecycleRequest | None = None,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_PUBLISH)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -252,7 +285,7 @@ async def archive_job(
 async def rollback_job_version(
     job_id: UUID,
     payload: cj_schemas.JobVersionRollbackRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_EDIT_ANY)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -277,7 +310,7 @@ async def get_job_publish_history(
 async def suggest_identity_matches(
     job_id: UUID,
     payload: cj_schemas.IdentityMatchRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.WORKSPACE_VIEW)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -290,11 +323,15 @@ async def suggest_identity_matches(
 async def import_asset_into_job(
     job_id: UUID,
     payload: cj_schemas.AssetImportRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(tenant_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
+    job = cj_services.get_job(db, job_id, tenant.owner)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     try:
-        return cj_services.import_asset_to_job(db, owner, job_id, payload.asset_id)
+        tenant.require_job_edit(job)
+        return cj_services.import_asset_to_job(db, tenant.owner, job_id, payload.asset_id)
     except Exception as exc:
         raise_context_jobs_http(exc)
 
@@ -306,7 +343,7 @@ async def get_audit_events(
     event_type: str | None = Query(default=None, alias="eventType"),
     from_date: datetime | None = Query(default=None, alias="fromDate"),
     to_date: datetime | None = Query(default=None, alias="toDate"),
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.AUDIT_VIEW)),
     db: Session = Depends(database.get_db),
 ):
     return cj_services.list_audit_events(
@@ -368,7 +405,7 @@ async def get_job_stats(
 )
 async def generate_job_from_prompt(
     payload: cj_schemas.PromptToJobRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -395,7 +432,7 @@ async def generate_job_from_prompt(
 async def run_job(
     job_id: UUID,
     payload: cj_schemas.JobRunCreate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_EXECUTE)),
     db: Session = Depends(database.get_db),
 ):
     try:

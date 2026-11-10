@@ -38,6 +38,8 @@ class ContextJobModel(database.Base):
     linked_child_job_id = Column(UUID(as_uuid=True), nullable=True)
     version = Column(Integer, nullable=False, default=1)
     owner = Column(String, nullable=True, default="current_user")
+    # Firebase UID of the member who created the job (owner is the workspace partition).
+    created_by = Column(String, nullable=True)
     approval_required = Column(Boolean, nullable=False, default=False)
     policy_profile = Column(String, nullable=True)
     execution_provider = Column(String, nullable=False, default="openai")
@@ -92,14 +94,31 @@ class ContextAssetModel(database.Base):
 
 
 class WorkspaceModel(database.Base):
+    """
+    A tenant. ``kind`` is ``personal`` (one per user, id ``ws_<uid>_default``) or
+    ``company`` (id ``org_<hex>``).
+
+    ``owner`` is the data partition key written to every owner-scoped row
+    (context_jobs.owner, llm_provider_keys.owner, ...): the user's Firebase UID for
+    a personal workspace and the workspace id itself for a company.
+    """
+
     __tablename__ = "workspaces"
 
     id = Column(String, primary_key=True, nullable=False)
     name = Column(Text, nullable=False)
     owner = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False, default="personal", server_default="personal")
+    status = Column(String, nullable=False, default="active", server_default="active")
+    slug = Column(String, nullable=True, unique=True)
+    package_name = Column(String, nullable=True)
+    access_expires_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_by = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
     tool_allowlist = Column(JSONB, nullable=True)
     source_allowlist = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
 
 
 class WorkspaceMemberModel(database.Base):
@@ -115,8 +134,36 @@ class WorkspaceMemberModel(database.Base):
         default=uuid.uuid4,
     )
     workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    # Firebase UID of the member.
     user_id = Column(String, nullable=False, index=True)
-    role = Column(String, nullable=False, default="editor")
+    role = Column(String, nullable=False, default="analyst")
+    status = Column(String, nullable=False, default="active", server_default="active")
+    invited_by = Column(String, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=True)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
+
+
+class WorkspaceInvitationModel(database.Base):
+    """Single-use, expiring invitation. Only the SHA-256 of the token is stored."""
+
+    __tablename__ = "workspace_invitations"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        nullable=False,
+        default=uuid.uuid4,
+    )
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    email = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    invited_by = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    accepted_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    accepted_by = Column(String, nullable=True)
+    revoked_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 class ContextJobVersionModel(database.Base):
@@ -172,6 +219,7 @@ class AuditEventModel(database.Base):
     entity_type = Column(String, nullable=False, index=True)
     entity_id = Column(String, nullable=False, index=True)
     actor = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=True, index=True)
     timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
     event_metadata = Column("metadata", JSONB, nullable=True)
 
@@ -215,6 +263,8 @@ class JobRunModel(database.Base):
     amendment_run_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     replay_snapshot = Column(JSONB, nullable=True)
     workspace_id = Column(String, nullable=True)
+    # Firebase UID of the member who started the run.
+    triggered_by = Column(String, nullable=True)
 
 
 class ProcurementAlertModel(database.Base):
