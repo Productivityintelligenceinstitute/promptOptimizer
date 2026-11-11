@@ -19,7 +19,7 @@ load_dotenv()
 # Note: This will create an engine, so DATABASE_URL must be set
 # For autogenerate to work, we need to import all models
 try:
-    from database.database import Base
+    from database.database import Base, normalize_database_url
     # Import all models so Alembic can detect them for autogenerate
     import schemas.user_model
     import schemas.subscription_model
@@ -34,6 +34,16 @@ except (ImportError, ModuleNotFoundError, ValueError) as e:
     # If import fails (e.g., missing DATABASE_URL, psycopg2, or invalid URL), 
     # we can still run manual migrations
     Base = None
+
+    def normalize_database_url(url):  # fallback when database module cannot be imported
+        if url and url.startswith("postgresql://"):
+            return "postgresql+psycopg2://" + url[len("postgresql://") :]
+        if url and url.startswith("postgres://"):
+            return "postgresql+psycopg2://" + url[len("postgres://") :]
+        if url and url.startswith("postgresql+psycopg://"):
+            return "postgresql+psycopg2://" + url[len("postgresql+psycopg://") :]
+        return url
+
     import warnings
     warnings.warn(
         f"Could not import models: {e}. "
@@ -45,7 +55,7 @@ except (ImportError, ModuleNotFoundError, ValueError) as e:
 config = context.config
 
 # Get database URL from environment
-database_url = os.getenv("DATABASE_URL")
+database_url = normalize_database_url(os.getenv("DATABASE_URL"))
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

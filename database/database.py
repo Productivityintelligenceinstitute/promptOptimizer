@@ -15,7 +15,22 @@ import os
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+
+def normalize_database_url(url: str | None) -> str | None:
+    """Force psycopg2 dialect — SQLAlchemy 2.1+ defaults postgresql:// to psycopg v3."""
+    if not url:
+        return url
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://") :]
+    if url.startswith("postgresql+psycopg://"):
+        # psycopg v3 is not a dependency of this project; psycopg2 is.
+        return "postgresql+psycopg2://" + url[len("postgresql+psycopg://") :]
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL"))
 
 engine = create_engine(DATABASE_URL)
 
