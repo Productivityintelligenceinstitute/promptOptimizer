@@ -3,7 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, owner_with
+from context_jobs.tenancy.roles import Capability
 from database import database
 from context_jobs.embeddings import supported_models_catalog
 from context_jobs.vector_connection_schemas import (
@@ -53,7 +54,7 @@ async def list_vector_connections(
 )
 async def create_vector_connection(
     payload: VectorConnectionCreate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -78,7 +79,7 @@ async def create_vector_connection(
 async def update_vector_connection(
     connection_id: UUID,
     payload: VectorConnectionUpdate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)
@@ -105,7 +106,7 @@ async def update_vector_connection(
 )
 async def test_vector_connection(
     connection_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)
@@ -122,7 +123,7 @@ async def test_vector_connection(
 )
 async def delete_vector_connection(
     connection_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = vc_services.get_connection(db, connection_id, owner)

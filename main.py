@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from contextlib import asynccontextmanager
 import asyncio
 import logging
@@ -25,13 +25,16 @@ from admin.routes.packages_permission import packages_permission_router
 from admin.routes.update_role import update_role_router
 from admin.routes.assign_package import assign_package_router
 from admin.routes.users import users_admin_router
+from admin.routes.tenants import tenants_admin_router
+from dependencies.admin import require_platform_admin
 
 from admin.core.ingestion_job import ingest_job
 from context_jobs.errors import register_context_jobs_exception_handlers
 from context_jobs.orchestrator import start_run_workers, stop_run_workers
 from context_jobs.schema_bootstrap import ensure_context_jobs_columns
+from context_jobs.tenancy.bootstrap import ensure_tenancy_schema
 from database.startup_seed import run_startup_seeds
-from database.database import SessionLocal
+from database.database import SessionLocal, engine
 
 from middleware.cors import setup_cors
 from fastapi_pagination import add_pagination
@@ -202,6 +205,7 @@ async def lifespan(app: FastAPI):
     # Ensure tables exist (for dev environments); production should rely on migrations.
     create_db_tables()
     ensure_context_jobs_columns()
+    ensure_tenancy_schema(engine)
     try:
         db = SessionLocal()
         run_startup_seeds(db)
@@ -256,6 +260,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Jet Prompt Optimizer APIs", lifespan=lifespan)
 
+# Legacy admin routers had no authentication; require a verified platform admin token.
+_ADMIN_ONLY = [Depends(require_platform_admin)]
+
 register_context_jobs_exception_handlers(app)
 
 setup_cors(app)
@@ -272,10 +279,11 @@ app.include_router(context_jobs_router, tags=["Context Jobs"])
 app.include_router(context_vector_connections_router, tags=["Context Jobs"])
 app.include_router(context_clm_connections_router, tags=["Context Jobs"])
 app.include_router(provider_keys_router, tags=["Context Jobs"])
-app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"])
-app.include_router(permissioons_router, tags=["Admin - Permission Management"])
-app.include_router(packages_router, tags=["Admin - Package Management"])
-app.include_router(packages_permission_router, tags=["Admin - Package Permission Management"])
-app.include_router(update_role_router, tags=["Admin - Update User Role"])
-app.include_router(assign_package_router, tags=["Admin - Assign Package"])
-app.include_router(users_admin_router, tags=["Admin - Users"])
+app.include_router(kb_ingestion_router, tags=["Admin - KB Ingestion"], dependencies=_ADMIN_ONLY)
+app.include_router(permissioons_router, tags=["Admin - Permission Management"], dependencies=_ADMIN_ONLY)
+app.include_router(packages_router, tags=["Admin - Package Management"], dependencies=_ADMIN_ONLY)
+app.include_router(packages_permission_router, tags=["Admin - Package Permission Management"], dependencies=_ADMIN_ONLY)
+app.include_router(update_role_router, tags=["Admin - Update User Role"], dependencies=_ADMIN_ONLY)
+app.include_router(assign_package_router, tags=["Admin - Assign Package"], dependencies=_ADMIN_ONLY)
+app.include_router(tenants_admin_router)
+app.include_router(users_admin_router, tags=["Admin - Users"], dependencies=_ADMIN_ONLY)

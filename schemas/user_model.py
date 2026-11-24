@@ -19,6 +19,7 @@ class UserModel(database.Base):
     # Soft delete / active flags
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     chats = relationship("ChatModel", back_populates="users", cascade="all, delete-orphan")
     subscriptions = relationship("SubscriptionsModel", back_populates="users", cascade="all, delete-orphan")

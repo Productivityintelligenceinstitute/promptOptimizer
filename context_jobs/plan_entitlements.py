@@ -25,7 +25,15 @@ from permissions.context_jobs_access import (
 )
 from repositories.check_package import CheckPackageRepository
 from repositories.subscription_repository import SubscriptionRepository
-from schemas.context_jobs_model import ContextJobModel, JobRunModel
+from context_jobs.tenancy.plans import (
+    ACCESS_ACTIVE,
+    ACCESS_MESSAGES,
+    company_access_state,
+    is_company,
+    package_permission,
+)
+from context_jobs.tenancy.keys import is_company_owner_key
+from schemas.context_jobs_model import ContextJobModel, JobRunModel, WorkspaceModel
 from schemas.user_model import UserModel
 
 TRIAL_MODELS: dict[str, str] = {
@@ -77,8 +85,51 @@ def _as_user(db: Session, owner_or_user: Union[str, UUID, UserModel]) -> UserMod
         raise ContextJobsAccessError(str(exc.detail)) from exc
 
 
+# Company workspaces follow Pro execution rules (BYOK, no trial caps), like platform admins.
+COMPANY_EXECUTION_PLAN = "pro"
+
+
+def _company_for_owner(
+    db: Session, owner_or_user: Union[str, UUID, UserModel]
+) -> Optional[WorkspaceModel]:
+    """The company workspace when ``owner_or_user`` is a company partition key, else None."""
+    if not isinstance(owner_or_user, str) or not is_company_owner_key(owner_or_user):
+        return None
+    workspace = db.get(WorkspaceModel, owner_or_user)
+    if workspace is None or not is_company(workspace):
+        raise ContextJobsAccessError("Workspace not found.")
+    return workspace
+
+
+def _require_active_company(workspace: WorkspaceModel) -> None:
+    state = company_access_state(workspace)
+    if state != ACCESS_ACTIVE:
+        raise ContextJobsAccessError(ACCESS_MESSAGES[state])
+
+
+def _company_grant(db: Session, workspace: WorkspaceModel, permission_name: str):
+    """Enabled packages_permission row for the company's package, or None."""
+    row = package_permission(db, workspace.package_name, permission_name)
+    return row if row is not None and row.is_enabled else None
+
+
+def _require_company_grant(
+    db: Session, workspace: WorkspaceModel, permission_name: str, message: str
+):
+    _require_active_company(workspace)
+    row = _company_grant(db, workspace, permission_name)
+    if row is None:
+        raise ContextJobsAccessError(message)
+    return row
+
+
 def resolve_package_name(db: Session, owner_or_user: Union[str, UUID, UserModel]) -> str:
     """Validated package name for execution rules (trial models vs pro BYOK)."""
+    company = _company_for_owner(db, owner_or_user)
+    if company is not None:
+        _require_active_company(company)
+        return COMPANY_EXECUTION_PLAN
+
     user = _as_user(db, owner_or_user)
 
     if user.role and str(user.role).lower() == "admin":
@@ -101,6 +152,12 @@ def resolve_package_name(db: Session, owner_or_user: Union[str, UUID, UserModel]
 
 def ensure_context_jobs_access(db: Session, owner_or_user: Union[str, UUID, UserModel]) -> str:
     """Ensure CONTEXT_JOBS permission via packages_permission. Returns package_name."""
+    company = _company_for_owner(db, owner_or_user)
+    if company is not None:
+        _require_company_grant(
+            db, company, PERMISSION_CONTEXT_JOBS, "This company's plan does not include Context Jobs."
+        )
+        return COMPANY_EXECUTION_PLAN
     user = _as_user(db, owner_or_user)
     try:
         validate_context_jobs_feature_access(db, user.id)
@@ -135,8 +192,26 @@ def count_runs(db: Session, owner: str) -> int:
     )
 
 
+def _assert_company_quota(db: Session, owner: str, permission_name: str, noun: str) -> None:
+    company = _company_for_owner(db, owner)
+    grant = _require_company_grant(
+        db, company, permission_name, f"This company's plan does not allow creating {noun}."
+    )
+    if grant.query_limit is None:
+        return
+    used = count_jobs(db, owner) if permission_name == PERMISSION_CONTEXT_JOBS_JOB else count_runs(db, owner)
+    if used >= grant.query_limit:
+        raise ContextJobsQuotaError(
+            f"Company plan limit reached: {grant.query_limit} {noun}. "
+            "Contact your JET account manager."
+        )
+
+
 def assert_can_create_job(db: Session, owner: str, package_name: str) -> None:
     _ = package_name
+    if is_company_owner_key(owner):
+        _assert_company_quota(db, owner, PERMISSION_CONTEXT_JOBS_JOB, "context jobs")
+        return
     user = _as_user(db, owner)
     try:
         validate_context_jobs_job_create(db, user.id)
@@ -154,6 +229,9 @@ def assert_can_create_job(db: Session, owner: str, package_name: str) -> None:
 
 def assert_can_create_run(db: Session, owner: str, package_name: str) -> None:
     _ = package_name
+    if is_company_owner_key(owner):
+        _assert_company_quota(db, owner, PERMISSION_CONTEXT_JOBS_RUN, "runs")
+        return
     user = _as_user(db, owner)
     try:
         validate_context_jobs_run_create(db, user.id)
@@ -170,11 +248,16 @@ def assert_can_create_run(db: Session, owner: str, package_name: str) -> None:
 
 
 def record_job_created(db: Session, owner: str) -> None:
+    # The usage ledger tracks individual trials; company usage is the row count itself.
+    if is_company_owner_key(owner):
+        return
     user = _as_user(db, owner)
     record_context_jobs_job_usage(db, user.id)
 
 
 def record_run_created(db: Session, owner: str) -> None:
+    if is_company_owner_key(owner):
+        return
     user = _as_user(db, owner)
     record_context_jobs_run_usage(db, user.id)
 
@@ -233,6 +316,8 @@ def build_entitlements(
 ) -> dict[str, Any]:
     """Plan-aware entitlements from packages_permission + subscription package."""
     user = _as_user(db, owner_or_user)
+    if owner and is_company_owner_key(owner):
+        return _build_company_entitlements(db, user, owner)
     owner_key = owner or user.firebase_uid or ""
     if not owner_key:
         raise ContextJobsAccessError("User account is missing firebase_uid.")
@@ -315,6 +400,68 @@ def build_entitlements(
         "usage": usage,
         "canCreateJob": can_create_job,
         "canCreateRun": can_create_run,
+        "providers": providers,
+    }
+
+
+def _disabled_entitlements(user_id: str, plan: Optional[str], message: str) -> dict[str, Any]:
+    return {
+        "userId": user_id,
+        "plan": plan,
+        "contextJobsEnabled": False,
+        "message": message,
+        "upgradeRequired": None,
+        "keyMode": None,
+        "canManageKeys": False,
+        "limits": None,
+        "usage": None,
+        "canCreateJob": False,
+        "canCreateRun": False,
+        "providers": [],
+    }
+
+
+def _build_company_entitlements(db: Session, user: UserModel, owner: str) -> dict[str, Any]:
+    """Entitlements for a company workspace: the company's package, not the member's."""
+    company = _company_for_owner(db, owner)
+    plan = company.package_name
+    state = company_access_state(company)
+    if state != ACCESS_ACTIVE:
+        return _disabled_entitlements(str(user.id), plan, ACCESS_MESSAGES[state])
+    if _company_grant(db, company, PERMISSION_CONTEXT_JOBS) is None:
+        return _disabled_entitlements(
+            str(user.id), plan, "This company's plan does not include Context Jobs."
+        )
+
+    job_grant = _company_grant(db, company, PERMISSION_CONTEXT_JOBS_JOB)
+    run_grant = _company_grant(db, company, PERMISSION_CONTEXT_JOBS_RUN)
+    job_limit = job_grant.query_limit if job_grant else None
+    run_limit = run_grant.query_limit if run_grant else None
+    job_count = count_jobs(db, owner)
+    run_count = count_runs(db, owner)
+
+    from context_jobs.provider_key_services import list_provider_catalog
+
+    providers = [
+        {**entry, "selectable": entry.get("hasUserKey", False)}
+        for entry in list_provider_catalog(db, owner, package_name=COMPANY_EXECUTION_PLAN)
+        if entry.get("hasUserKey")
+    ]
+    limits = None
+    if job_limit is not None or run_limit is not None:
+        limits = {"maxJobs": job_limit, "maxRuns": run_limit}
+    return {
+        "userId": str(user.id),
+        "plan": plan,
+        "contextJobsEnabled": True,
+        "message": None,
+        "upgradeRequired": None,
+        "keyMode": "byok",
+        "canManageKeys": True,
+        "limits": limits,
+        "usage": {"jobs": job_count, "runs": run_count},
+        "canCreateJob": job_grant is not None and (job_limit is None or job_count < job_limit),
+        "canCreateRun": run_grant is not None and (run_limit is None or run_count < run_limit),
         "providers": providers,
     }
 

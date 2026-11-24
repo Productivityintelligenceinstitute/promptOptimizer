@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from constants.file_types import ALLOWED_EXTS
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, owner_with, tenant_with
+from context_jobs.tenancy.context import TenantContext
+from context_jobs.tenancy.features import require_procurement_templates
+from context_jobs.tenancy.roles import Capability
 from context_jobs.errors import raise_context_jobs_http
 from context_jobs.procurement_demo_kb import (
     DEFAULT_TEMPLATE_NAME,
@@ -61,7 +64,7 @@ async def list_procurement_alerts(
 @router.post("/alerts/{alert_id}/dismiss", response_model=ProcurementAlertOut)
 async def dismiss_procurement_alert(
     alert_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ) -> ProcurementAlertOut:
     alert = alert_services.dismiss_alert(db, owner, alert_id)
@@ -83,7 +86,7 @@ async def register_procurement_alert_contract(
     complexityTier: str | None = Form("medium"),
     file: UploadFile | None = File(None),
     contractText: str | None = Form(None),
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ) -> ProcurementContractRegisterOut:
     """
@@ -151,7 +154,7 @@ async def register_procurement_alert_contract(
 )
 async def setup_procurement_demo(
     payload: ProcurementDemoSetupRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(tenant_with(Capability.JOBS_CREATE)),
     db: Session = Depends(database.get_db),
 ) -> ProcurementDemoSetupOut:
     """
@@ -160,7 +163,9 @@ async def setup_procurement_demo(
     Lifecycle chaining is disabled; ``enableChain`` is accepted for API compatibility
     and ignored.
     """
+    owner = tenant.owner
     try:
+        require_procurement_templates(db, tenant)
         _ = payload.enable_chain
         template = None
         if payload.template_id is not None:
@@ -175,7 +180,9 @@ async def setup_procurement_demo(
         if not template:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
 
-        job = instantiate_template_job(db, owner, template.id)
+        job = instantiate_template_job(
+            db, owner, template.id, auto_publish=tenant.can(Capability.JOBS_PUBLISH)
+        )
 
         ingestion = seed_demo_kb_for_job(db, owner, job.id)
         return ProcurementDemoSetupOut(

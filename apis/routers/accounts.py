@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from uuid import uuid4
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from models import user_models
@@ -12,6 +12,7 @@ from dependencies.auth import verify_firebase_token
 from schemas.user_model import UserModel
 from schemas.subscription_model import SubscriptionsModel
 from schemas.packages_model import PackagesModel
+from context_jobs.tenancy.plans import COMPANY_PACKAGE_NAME, active_company_workspaces_for_user
 
 logger = logging.getLogger(__name__)
 accounts_router = APIRouter()
@@ -166,6 +167,26 @@ async def create_account(
             detail="An unexpected error occurred while creating account"
         )
 
+# Avoid a write on every page load; sign-in recency only needs minute precision.
+_LAST_LOGIN_GRANULARITY = timedelta(minutes=5)
+
+
+def _touch_last_login(db: Session, user: UserModel) -> None:
+    now = datetime.now(timezone.utc)
+    last = user.last_login_at
+    if last is not None and last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    if last is not None and now - last < _LAST_LOGIN_GRANULARITY:
+        return
+    try:
+        user.last_login_at = now
+        db.add(user)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("Could not record last sign-in for user %s", user.id, exc_info=True)
+
+
 @accounts_router.get(
     "/me",
     response_model=user_models.UserResponse,
@@ -313,6 +334,15 @@ async def get_current_user(
             logger.warning(f"Failed to fetch package information for user {user.id}: {e}")
             # Don't fail the request if package lookup fails
         
+        _touch_last_login(db, user)
+
+        # Active company membership supersedes the personal plan (company is the superset).
+        personal_package_name = package_name or "free"
+        company_access = bool(active_company_workspaces_for_user(db, firebase_uid))
+        if company_access:
+            package_name = COMPANY_PACKAGE_NAME
+            trial_ends_at = None
+
         # Format created_at timestamp
         created_at_str: Optional[str] = None
         if user.created_at:
@@ -330,6 +360,8 @@ async def get_current_user(
             created_at=created_at_str,
             package_name=package_name or "free",  # Default to "free" if not found
             trial_ends_at=trial_ends_at,
+            personal_package_name=personal_package_name,
+            company_access=company_access,
         )
         
     except HTTPException:

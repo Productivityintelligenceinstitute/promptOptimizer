@@ -10,10 +10,30 @@ from schemas.packages_model import PackagesModel
 from core.exceptions.access import AccessDeniedException
 
 
+def _company_grant(db, user_id, permission):
+    """Grant from an active company the user belongs to (invoice-billed plans), or None."""
+    from context_jobs.tenancy.plans import company_permission_for_user
+    from schemas.user_model import UserModel
+
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user or not user.firebase_uid:
+        return None
+    return company_permission_for_user(db, user.firebase_uid, permission)
+
+
 def validate_access(db, user_id, permission):
     role = RoleRepository.check_role(db, user_id)
 
     if role == "admin":
+        return
+
+    # Company members use their company's package, independent of any personal plan.
+    company_access = _company_grant(db, user_id, permission)
+    if company_access is not None:
+        UsageRepository.check_daily_usage(
+            db, user_id, company_access.permission_id, company_access.query_limit
+        )
+        UsageRepository.increment_daily_usage(db, user_id, company_access.permission_id)
         return
 
     # Ensure user has an active, time-valid package (trial or paid)

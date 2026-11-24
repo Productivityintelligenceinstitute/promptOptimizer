@@ -3,7 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, owner_with
+from context_jobs.tenancy.roles import Capability
 from context_jobs.clm.adapters import SUPPORTED_CLM_PROVIDERS
 from context_jobs.clm_connection_schemas import (
     ClmConnectionCreate,
@@ -51,7 +52,7 @@ async def list_clm_connections(
 )
 async def create_clm_connection(
     payload: ClmConnectionCreate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -76,7 +77,7 @@ async def create_clm_connection(
 async def update_clm_connection(
     connection_id: UUID,
     payload: ClmConnectionUpdate,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = clm_services.get_connection(db, connection_id, owner)
@@ -103,7 +104,7 @@ async def update_clm_connection(
 )
 async def test_clm_connection(
     connection_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = clm_services.get_connection(db, connection_id, owner)
@@ -120,7 +121,7 @@ async def test_clm_connection(
 )
 async def delete_clm_connection(
     connection_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     conn = clm_services.get_connection(db, connection_id, owner)

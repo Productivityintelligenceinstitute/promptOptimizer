@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from constants.file_types import ALLOWED_EXTS
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, owner_with
+from context_jobs.tenancy.roles import Capability
 from context_jobs.clm_connection_schemas import ClmImportRequest, ClmImportResult
 from context_jobs.errors import raise_context_jobs_http
 from context_jobs.services.clm_import import import_clm_contract_into_job
@@ -44,7 +45,7 @@ def _ingestion_response(result: IngestionResult, **extra: Any) -> dict[str, Any]
 @router.post("/ingest/external", response_model=dict[str, Any])
 async def ingest_into_external_db(
     payload: cj_schemas.ExternalIngestionRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -78,7 +79,7 @@ async def ingest_into_external_db(
 async def ingest_job_into_external_db(
     job_id: UUID,
     payload: cj_schemas.ExternalIngestionRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_MANAGE)),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -113,7 +114,7 @@ async def ingest_job_into_external_db(
 async def ingest_into_job(
     job_id: UUID,
     payload: cj_schemas.IngestionRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -170,7 +171,7 @@ def _extract_text_from_upload(upload: UploadFile, raw: bytes) -> str:
 async def ingest_clm_contract_into_job(
     job_id: UUID,
     payload: ClmImportRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -206,7 +207,7 @@ async def ingest_files_into_job(
     job_id: UUID,
     files: list[UploadFile] = File(...),
     metadata_json: str | None = Form(None, alias="metadataJson"),
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.KNOWLEDGE_CONTRIBUTE)),
     db: Session = Depends(database.get_db),
 ):
     """

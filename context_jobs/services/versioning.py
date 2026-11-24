@@ -8,6 +8,7 @@ import context_jobs.audit as cj_audit
 from context_jobs.errors import ContextJobsNotFoundError
 from context_jobs.services._constants import JOB_VERSION_SNAPSHOT_FIELDS
 from context_jobs.services.job_queries import get_job
+from context_jobs.tenancy.request_actor import acting_user
 from schemas.context_jobs_model import (
     ContextJobModel,
     ContextJobVersionModel,
@@ -43,7 +44,7 @@ def ensure_job_version_seed(db: Session, job: ContextJobModel, created_by: Optio
             job_id=job.id,
             version=seed_version,
             snapshot=job_snapshot(job),
-            created_by=created_by or job.owner,
+            created_by=acting_user(created_by or job.owner),
             change_type="seed",
             is_current=True,
         )
@@ -142,7 +143,7 @@ def record_job_version(
         job_id=job.id,
         version=int(job.version or 1),
         snapshot=job_snapshot(job),
-        created_by=created_by or job.owner,
+        created_by=acting_user(created_by or job.owner),
         change_type=change_type,
         is_current=True,
         rollback_from_version=rollback_from_version,
@@ -167,7 +168,7 @@ def record_publish_history(
         job_id=job_id,
         from_status=from_status,
         to_status=to_status,
-        changed_by=changed_by,
+        changed_by=acting_user(changed_by),
         notes=notes,
     )
     db.add(row)

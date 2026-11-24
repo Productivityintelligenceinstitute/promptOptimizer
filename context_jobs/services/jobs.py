@@ -31,6 +31,8 @@ from context_jobs.plan_entitlements import (
     ensure_context_jobs_access,
     record_job_created,
 )
+from context_jobs.tenancy.keys import is_company_owner_key
+from context_jobs.tenancy.request_actor import acting_user
 from context_jobs.workspace import ensure_default_workspace
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 
@@ -59,15 +61,67 @@ def _normalize_linked_asset_ids(raw: Any) -> list[str]:
     return out
 
 
-def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> ContextJobModel:
+def _job_creator(owner: str) -> Optional[str]:
+    """Firebase UID of the member creating a job (the owner itself for personal workspaces)."""
+    return acting_user(None if is_company_owner_key(owner) else owner)
+
+
+def _record_auto_publish(db: Session, job: ContextJobModel, owner: str, notes: str, **metadata: Any) -> None:
+    record_publish_history(
+        db,
+        job_id=job.id,
+        from_status="draft",
+        to_status="published",
+        changed_by=owner,
+        notes=notes,
+    )
+    cj_audit.write_audit_event(
+        db,
+        event_type="job.published",
+        entity_type="job",
+        entity_id=str(job.id),
+        actor=owner,
+        metadata={
+            "fromStatus": "draft",
+            "toStatus": "published",
+            "notes": notes,
+            "jobVersion": job.version,
+            **metadata,
+        },
+    )
+
+
+def _record_draft_created(db: Session, job: ContextJobModel, owner: str, **metadata: Any) -> None:
+    cj_audit.write_audit_event(
+        db,
+        event_type="job.created",
+        entity_type="job",
+        entity_id=str(job.id),
+        actor=owner,
+        metadata={"status": "draft", "jobVersion": job.version, **metadata},
+    )
+
+
+def create_job(
+    db: Session,
+    owner: str,
+    data: cj_schemas.ContextJobCreate,
+    *,
+    auto_publish: bool = True,
+) -> ContextJobModel:
+    """
+    Create a job. ``auto_publish`` is False when the member cannot publish (company
+    analysts): the job is saved as a draft until a manager publishes it.
+    """
     package_name = ensure_context_jobs_access(db, owner)
     assert_can_create_job(db, owner, package_name)
     ws = ensure_default_workspace(db, owner)
     payload = _normalize_job_payload(data.model_dump(by_alias=False))
     asset_ids = _normalize_linked_asset_ids(payload.pop("asset_ids", None) or [])
     payload["owner"] = owner
-    payload["workspace_id"] = payload.get("workspace_id") or ws.id
-    payload["status"] = "published"
+    payload["workspace_id"] = ws.id
+    payload["created_by"] = _job_creator(owner)
+    payload["status"] = "published" if auto_publish else "draft"
     provider, model, key_id = validate_job_execution_for_plan(
         db,
         owner,
@@ -93,27 +147,10 @@ def create_job(db: Session, owner: str, data: cj_schemas.ContextJobCreate) -> Co
     db.commit()
     db.refresh(job)
     record_job_version(db, job, created_by=owner, change_type="create")
-    record_publish_history(
-        db,
-        job_id=job.id,
-        from_status="draft",
-        to_status="published",
-        changed_by=owner,
-        notes="Auto-published on create",
-    )
-    cj_audit.write_audit_event(
-        db,
-        event_type="job.published",
-        entity_type="job",
-        entity_id=str(job.id),
-        actor=owner,
-        metadata={
-            "fromStatus": "draft",
-            "toStatus": "published",
-            "notes": "Auto-published on create",
-            "jobVersion": job.version,
-        },
-    )
+    if auto_publish:
+        _record_auto_publish(db, job, owner, "Auto-published on create")
+    else:
+        _record_draft_created(db, job, owner)
     maybe_ensure_jet_managed_namespace(db, job)
     record_job_created(db, owner)
     return job
@@ -127,6 +164,9 @@ def update_job(
 ) -> ContextJobModel:
     package_name = ensure_context_jobs_access(db, owner)
     payload = _normalize_job_payload(data.model_dump(exclude_unset=True, by_alias=False))
+    # Partition fields are server-owned; a job never moves between workspaces.
+    payload.pop("owner", None)
+    payload.pop("workspace_id", None)
     asset_ids_raw = payload.pop("asset_ids", None)
     merged_mode = payload.get("retrieval_mode", job.retrieval_mode)
     merged_conn = payload.get("vector_connection_id", job.vector_connection_id)
@@ -267,7 +307,8 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
         owner=owner,
         approval_required=job.approval_required,
         policy_profile=job.policy_profile,
-        workspace_id=job.workspace_id or ws.id,
+        workspace_id=ws.id,
+        created_by=_job_creator(owner),
         linked_asset_ids=list(job.linked_asset_ids or []) if isinstance(job.linked_asset_ids, list) else [],
     )
     db.add(duplicated)
@@ -281,8 +322,14 @@ def duplicate_job(db: Session, owner: str, job: ContextJobModel) -> ContextJobMo
     return duplicated
 
 
-def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> ContextJobModel:
-    """Duplicate a system template into the caller's workspace as a published job."""
+def instantiate_template_job(
+    db: Session,
+    owner: str,
+    template_id: UUID,
+    *,
+    auto_publish: bool = True,
+) -> ContextJobModel:
+    """Duplicate a system template into the caller's workspace (published unless ``auto_publish`` is False)."""
     template = get_template_job(db, template_id)
     if not template:
         raise ContextJobsNotFoundError("Template not found")
@@ -302,7 +349,7 @@ def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> Cont
     job = ContextJobModel(
         name=template.name,
         description=template.description,
-        status="published",
+        status="published" if auto_publish else "draft",
         goal=template.goal,
         semantic_blueprint=template.semantic_blueprint,
         output_template=template.output_template,
@@ -331,33 +378,18 @@ def instantiate_template_job(db: Session, owner: str, template_id: UUID) -> Cont
         approval_required=template.approval_required,
         policy_profile=template.policy_profile,
         workspace_id=ws.id,
+        created_by=_job_creator(owner),
     )
     db.add(job)
     db.commit()
     db.refresh(job)
     record_job_version(db, job, created_by=owner, change_type="instantiate")
-    record_publish_history(
-        db,
-        job_id=job.id,
-        from_status="draft",
-        to_status="published",
-        changed_by=owner,
-        notes="Instantiated from system template",
-    )
-    cj_audit.write_audit_event(
-        db,
-        event_type="job.published",
-        entity_type="job",
-        entity_id=str(job.id),
-        actor=owner,
-        metadata={
-            "fromStatus": "draft",
-            "toStatus": "published",
-            "notes": "Instantiated from system template",
-            "templateId": str(template_id),
-            "jobVersion": job.version,
-        },
-    )
+    if auto_publish:
+        _record_auto_publish(
+            db, job, owner, "Instantiated from system template", templateId=str(template_id)
+        )
+    else:
+        _record_draft_created(db, job, owner, templateId=str(template_id))
     maybe_ensure_jet_managed_namespace(db, job)
     record_job_created(db, owner)
     return job

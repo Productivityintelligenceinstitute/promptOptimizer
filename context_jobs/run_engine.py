@@ -315,7 +315,8 @@ async def _execute_run_async(run_id: UUID) -> None:
                     event_type="run.escalated",
                     entity_type="run",
                     entity_id=str(run.id),
-                    actor=job.owner,
+                    actor=run.triggered_by or job.owner,
+                    workspace_id=run.workspace_id,
                     metadata={
                         "status": rop.get("status"),
                         "outcome": outcome,
@@ -481,7 +482,8 @@ async def _validate_output(
             event_type="validation.failed",
             entity_type="run",
             entity_id=str(run.id),
-            actor=job.owner,
+            actor=run.triggered_by or job.owner,
+            workspace_id=run.workspace_id,
             metadata={
                 "status": validation_summary.status,
                 "repairReason": validation_summary.repair_reason,
