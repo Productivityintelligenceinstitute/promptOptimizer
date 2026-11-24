@@ -7,7 +7,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from context_jobs.auth import get_context_jobs_owner, get_context_jobs_owner_with_access
+from context_jobs.auth import (
+    CAPABILITY_ATTR,
+    get_context_jobs_owner_with_access,
+    get_tenant_context,
+    owner_with,
+)
+from context_jobs.tenancy.context import TenantContext
+from context_jobs.tenancy.features import procurement_templates_enabled
+from context_jobs.tenancy.roles import ROLE_LABELS, Capability, capabilities_for
 from context_jobs import provider_key_services as key_services
 from context_jobs.errors import raise_context_jobs_http
 from context_jobs.plan_entitlements import (
@@ -30,11 +38,7 @@ from database import database
 provider_keys_router = APIRouter(prefix="/context-jobs")
 
 
-def _require_byok_keys(
-    owner: str = Depends(get_context_jobs_owner_with_access),
-    db: Session = Depends(database.get_db),
-) -> str:
-    """BYOK key routes for trial + pro Context Jobs users."""
+def _assert_byok(db: Session, owner: str) -> str:
     try:
         assert_byok_llm_keys_allowed(db, owner)
     except Exception as exc:
@@ -42,14 +46,31 @@ def _require_byok_keys(
     return owner
 
 
-_require_pro_byok_keys = _require_byok_keys
+def _view_byok_keys(
+    owner: str = Depends(get_context_jobs_owner_with_access),
+    db: Session = Depends(database.get_db),
+) -> str:
+    """List keys (masked) — every member needs this to pick a key in the job builder."""
+    return _assert_byok(db, owner)
+
+
+def _manage_byok_keys(
+    owner: str = Depends(owner_with(Capability.SETTINGS_MANAGE)),
+    db: Session = Depends(database.get_db),
+) -> str:
+    """Add, verify or revoke keys — workspace settings, Tenant Admin only."""
+    return _assert_byok(db, owner)
+
+
+setattr(_view_byok_keys, CAPABILITY_ATTR, Capability.WORKSPACE_VIEW)
+setattr(_manage_byok_keys, CAPABILITY_ATTR, Capability.SETTINGS_MANAGE)
 
 
 @provider_keys_router.get("/llm-keys", response_model=list[LlmKeyOut], tags=["Context Jobs"])
 async def list_llm_keys(
     provider: str | None = None,
     purpose: str | None = None,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_view_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -68,7 +89,7 @@ async def list_llm_keys(
 )
 async def list_llm_key_models(
     key_id: UUID,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_view_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     """
@@ -92,7 +113,7 @@ async def list_llm_key_models(
 )
 async def create_llm_key(
     payload: LlmKeyCreate,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_manage_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -104,7 +125,7 @@ async def create_llm_key(
 @provider_keys_router.delete("/llm-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Context Jobs"])
 async def revoke_llm_key(
     key_id: UUID,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_manage_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -117,7 +138,7 @@ async def revoke_llm_key(
 @provider_keys_router.post("/llm-keys/{key_id}/verify", response_model=LlmKeyOut, tags=["Context Jobs"])
 async def verify_llm_key(
     key_id: UUID,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_manage_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -128,7 +149,7 @@ async def verify_llm_key(
 
 @provider_keys_router.get("/tool-keys", response_model=list[ToolKeyOut], tags=["Context Jobs"])
 async def list_tool_keys(
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_view_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     return key_services.list_tool_keys(db, owner)
@@ -142,7 +163,7 @@ async def list_tool_keys(
 )
 async def create_tool_key(
     payload: ToolKeyCreate,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_manage_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -154,7 +175,7 @@ async def create_tool_key(
 @provider_keys_router.delete("/tool-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Context Jobs"])
 async def revoke_tool_key(
     key_id: UUID,
-    owner: str = Depends(_require_pro_byok_keys),
+    owner: str = Depends(_manage_byok_keys),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -170,11 +191,24 @@ async def revoke_tool_key(
     tags=["Context Jobs"],
 )
 async def get_context_jobs_entitlements(
-    owner: str = Depends(get_context_jobs_owner),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
-    # UI gating: return plan-aware payload for every package (including essential).
-    return build_entitlements(db, owner)
+    # UI gating: return plan-aware payload for every package (including essential),
+    # for the active workspace, plus the member's role so the UI can hide actions.
+    entitlements = build_entitlements(db, tenant.user_id, owner=tenant.owner)
+    return {
+        **entitlements,
+        "workspace": {
+            "id": tenant.workspace_id,
+            "name": tenant.workspace_name,
+            "kind": tenant.workspace_kind,
+            "role": tenant.role.value,
+            "roleLabel": ROLE_LABELS[tenant.role],
+            "capabilities": capabilities_for(tenant.role),
+        },
+        "procurementTemplates": procurement_templates_enabled(db, tenant),
+    }
 
 
 @provider_keys_router.get("/providers", response_model=list[ProviderInfo], tags=["Context Jobs"])

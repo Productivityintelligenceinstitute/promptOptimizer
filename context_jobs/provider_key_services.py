@@ -385,13 +385,18 @@ def resolve_llm_api_key(
         "google": os.environ.get("GEMINI_API_KEY"),
     }
 
-    user = UserRepository.get_active_by_firebase_uid(owner, db)
+    from context_jobs.tenancy.keys import is_company_owner_key
+
+    # Company workspaces are their own plan subject and must always bring their own key;
+    # they never fall through to Jet's managed server keys.
+    company = is_company_owner_key(owner)
+    user = None if company else UserRepository.get_active_by_firebase_uid(owner, db)
     is_admin = bool(user and user.role and str(user.role).lower() == "admin")
     if not is_admin:
-        if not user:
+        if not company and not user:
             raise ValueError("User not found. Please create an account first.")
         if package_name is None:
-            package_name = ensure_context_jobs_access(db, user)
+            package_name = ensure_context_jobs_access(db, owner if company else user)
         if not llm_key_id:
             provider = (execution_provider or "openai").lower().strip()
             if package_name == "pro":

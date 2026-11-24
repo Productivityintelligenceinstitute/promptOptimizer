@@ -24,6 +24,8 @@ from context_jobs.run_workflows import (
 )
 from context_jobs.services.amendment import is_contract_review_job, start_amendment_run
 from context_jobs.services.job_queries import get_job
+from context_jobs.tenancy.keys import is_company_owner_key
+from context_jobs.tenancy.request_actor import acting_user
 from context_jobs.workspace import default_workspace_id
 from schemas.context_jobs_model import ContextJobModel, JobRunModel, RunChainModel
 
@@ -94,6 +96,7 @@ def create_run(
         user_request=normalize_untrusted_text(data.user_request or ""),
         job_version=job.version,
         workspace_id=getattr(job, "workspace_id", None) or default_workspace_id(owner),
+        triggered_by=acting_user(None if is_company_owner_key(owner) else owner),
     )
     db.add(run)
     db.commit()
@@ -216,6 +219,8 @@ def record_human_decision(
     job = get_job(db, run.job_id, owner)
     if not job:
         raise ContextJobsNotFoundError("Run not found")
+    # The verified member, never the client-supplied decidedBy, inside a request.
+    decided_by = acting_user(data.decided_by or owner)
 
     if decision in {"approve", "approved", "accept", "accepted"} and is_contract_review_job(job):
         start_amendment_run(db, owner, run, job, notes=data.notes)
@@ -223,7 +228,7 @@ def record_human_decision(
 
     run.human_decision = {
         "decision": data.decision,
-        "decidedBy": data.decided_by or owner,
+        "decidedBy": decided_by,
         "decidedAt": datetime.now(timezone.utc).isoformat(),
         "notes": data.notes or "",
         "amendmentRunId": str(run.amendment_run_id) if run.amendment_run_id else None,
@@ -242,11 +247,11 @@ def record_human_decision(
             event_type=event_type,
             entity_type="run",
             entity_id=str(run.id),
-            actor=data.decided_by or owner,
+            actor=decided_by,
             metadata={
                 "decision": data.decision,
                 "notes": data.notes,
-                "decidedBy": data.decided_by or owner,
+                "decidedBy": decided_by,
                 "runState": run.state,
             },
         )
@@ -281,7 +286,7 @@ def resolve_run_tool_approval(
     run = get_run(db, run_id, owner)
     if not run:
         raise ContextJobsNotFoundError("Run not found")
-    return resolve_tool_approval(db, run, approval_id, decision, owner, notes)
+    return resolve_tool_approval(db, run, approval_id, decision, acting_user(owner), notes)
 
 
 def confirm_run_memory(

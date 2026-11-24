@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 import context_jobs.audit as cj_audit
 from context_jobs.errors import ContextJobsNotFoundError
+from context_jobs.tenancy.request_actor import acting_user
 from schemas.context_jobs_model import ContextJobModel, JobRunModel
 from schemas.tool_execution_model import ToolExecutionModel
 
@@ -56,6 +57,8 @@ def create_replay_run(db: Session, owner: str, source_run: JobRunModel) -> JobRu
         job_version=job_version,
         parent_run_id=source_run.id,
         repair_cycles=0,
+        workspace_id=source_run.workspace_id or getattr(job, "workspace_id", None),
+        triggered_by=acting_user(source_run.triggered_by),
     )
     db.add(new_run)
     db.commit()

@@ -7,7 +7,9 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from context_jobs.artifacts import merge_rop_and_disk_artifacts, resolve_download_artifact, resolve_download_blob
-from context_jobs.auth import get_context_jobs_owner_with_access
+from context_jobs.auth import get_context_jobs_owner_with_access, get_tenant_context, owner_with
+from context_jobs.tenancy.context import TenantContext
+from context_jobs.tenancy.roles import Capability
 from context_jobs.errors import ContextJobsNotFoundError, raise_context_jobs_http
 from database import database
 from context_jobs import schemas as cj_schemas
@@ -17,15 +19,49 @@ from context_jobs import services as cj_services
 router = APIRouter(tags=["Context Jobs"])
 
 
+def _require_visible_run(db: Session, tenant: TenantContext, owner: str, run_id: UUID):
+    """The run if it is in this workspace and the member may see its output, else 404."""
+    run = cj_services.get_run(db, run_id, owner)
+    if not run or not tenant.can_view_run(run):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return run
+
+
+def _prune_chain_for_member(db: Session, tenant: TenantContext, owner: str, chain: dict) -> dict:
+    """Drop parent/child runs the member may not see (viewers: unapproved runs)."""
+    if tenant.can(Capability.RUNS_EXECUTE) or tenant.can(Capability.RUNS_APPROVE):
+        return chain
+
+    def visible(run_id) -> bool:
+        run = cj_services.get_run(db, run_id, owner)
+        return bool(run and tenant.can_view_run(run))
+
+    def prune(nodes: list) -> list:
+        kept = []
+        for node in nodes or []:
+            if visible(node.get("runId")):
+                kept.append({**node, "childRuns": prune(node.get("childRuns"))})
+        return kept
+
+    pruned = dict(chain)
+    if pruned.get("parentRunId") and not visible(pruned["parentRunId"]):
+        pruned["parentRunId"] = None
+        pruned["parentRun"] = None
+    pruned["childRuns"] = prune(pruned.get("childRuns"))
+    return pruned
+
+
 @router.get("/runs", response_model=list[cj_schemas.JobRunOut])
 async def list_runs(
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
     try:
-        return cj_services.list_runs(db, owner)
+        runs = cj_services.list_runs(db, owner)
     except Exception as exc:
         raise_context_jobs_http(exc)
+    return [run for run in runs if tenant.can_view_run(run)]
 
 
 @router.get("/runs/queue-status")
@@ -39,11 +75,10 @@ async def get_runs_queue_status(
 async def get_run(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
-    run = cj_services.get_run(db, run_id, owner)
-    if not run:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    run = _require_visible_run(db, tenant, owner, run_id)
     return run
 
 
@@ -51,23 +86,24 @@ async def get_run(
 async def get_run_chain(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
+    _require_visible_run(db, tenant, owner, run_id)
     result = cj_services.get_run_chain(db, owner, run_id)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    return result
+    return _prune_chain_for_member(db, tenant, owner, result)
 
 
 @router.get("/runs/{run_id}/artifacts", response_model=cj_schemas.RunArtifactsOut)
 async def list_run_artifacts(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
-    run = cj_services.get_run(db, run_id, owner)
-    if not run:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    run = _require_visible_run(db, tenant, owner, run_id)
     return {
         "runId": run.id,
         "artifacts": merge_rop_and_disk_artifacts(owner, run, db),
@@ -79,11 +115,10 @@ async def download_run_artifact(
     run_id: UUID,
     artifact_path: str,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
-    run = cj_services.get_run(db, run_id, owner)
-    if not run:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    run = _require_visible_run(db, tenant, owner, run_id)
     try:
         blob = resolve_download_blob(owner, run, artifact_path, db)
         if blob is not None:
@@ -102,7 +137,7 @@ async def download_run_artifact(
             if not run.amendment_run_id:
                 raise
             child = cj_services.get_run(db, run.amendment_run_id, owner)
-            if not child:
+            if not child or not tenant.can_view_run(child):
                 raise
             target = resolve_download_artifact(owner, child, artifact_path)
     except Exception as exc:
@@ -116,7 +151,7 @@ async def download_run_artifact(
 async def record_run_decision(
     run_id: UUID,
     payload: cj_schemas.RunDecisionRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_APPROVE)),
     db: Session = Depends(database.get_db),
 ):
     run = cj_services.get_run(db, run_id, owner)
@@ -148,7 +183,7 @@ async def record_run_decision(
 )
 async def replay_run(
     run_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_EXECUTE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -167,8 +202,10 @@ async def replay_run(
 async def get_run_tool_executions(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
+    _require_visible_run(db, tenant, owner, run_id)
     try:
         return cj_services.get_run_tool_executions(db, owner, run_id)
     except Exception as exc:
@@ -179,8 +216,10 @@ async def get_run_tool_executions(
 async def get_pending_tool_approvals(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
+    _require_visible_run(db, tenant, owner, run_id)
     from context_jobs.hitl import list_pending_tool_approvals
 
     run = cj_services.get_run(db, run_id, owner)
@@ -197,7 +236,7 @@ async def decide_tool_approval(
     run_id: UUID,
     approval_id: str,
     payload: cj_schemas.ToolApprovalRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_APPROVE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -212,7 +251,7 @@ async def decide_tool_approval(
 async def confirm_memory_writes(
     run_id: UUID,
     payload: cj_schemas.MemoryConfirmRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_APPROVE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -228,7 +267,7 @@ async def confirm_memory_writes(
 async def attach_contract(
     run_id: UUID,
     payload: cj_schemas.AttachContractRequest,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_EXECUTE)),
     db: Session = Depends(database.get_db),
 ):
     run = cj_services.get_run(db, run_id, owner)
@@ -252,7 +291,7 @@ async def attach_contract(
 )
 async def retry_amendment(
     run_id: UUID,
-    owner: str = Depends(get_context_jobs_owner_with_access),
+    owner: str = Depends(owner_with(Capability.RUNS_EXECUTE)),
     db: Session = Depends(database.get_db),
 ):
     try:
@@ -273,8 +312,10 @@ async def retry_amendment(
 async def export_run(
     run_id: UUID,
     owner: str = Depends(get_context_jobs_owner_with_access),
+    tenant: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(database.get_db),
 ):
+    _require_visible_run(db, tenant, owner, run_id)
     try:
         markdown = cj_services.export_run_report(db, owner, run_id)
         return PlainTextResponse(content=markdown, media_type="text/markdown")

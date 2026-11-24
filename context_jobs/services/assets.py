@@ -40,6 +40,19 @@ def get_importable_asset(
     )
 
 
+# Partition fields are always set by the server, never by the request body.
+_SERVER_OWNED_FIELDS = ("owner", "workspace_id")
+
+
+def get_owned_asset(db: Session, asset_id: UUID, owner: str) -> Optional[ContextAssetModel]:
+    """Asset the workspace may modify: its own only (shared/system assets are read-only)."""
+    return (
+        db.query(ContextAssetModel)
+        .filter(ContextAssetModel.id == asset_id, ContextAssetModel.owner == owner)
+        .first()
+    )
+
+
 def get_asset(db: Session, asset_id: UUID, owner: Optional[str] = None) -> Optional[ContextAssetModel]:
     q = db.query(ContextAssetModel).filter(ContextAssetModel.id == asset_id)
     if owner:
@@ -54,7 +67,7 @@ def create_asset(db: Session, owner: str, data: cj_schemas.ContextAssetCreate) -
     validate_asset_content(data.type, data.content)
     payload = data.model_dump(by_alias=False)
     payload["owner"] = owner
-    payload["workspace_id"] = payload.get("workspace_id") or default_workspace_id(owner)
+    payload["workspace_id"] = default_workspace_id(owner)
     asset = ContextAssetModel(**payload)
     db.add(asset)
     db.commit()
@@ -68,6 +81,8 @@ def update_asset(
     data: cj_schemas.ContextAssetUpdate,
 ) -> ContextAssetModel:
     payload = data.model_dump(exclude_unset=True, by_alias=False)
+    for field in _SERVER_OWNED_FIELDS:
+        payload.pop(field, None)
     if payload.get("type"):
         validate_asset_type(payload["type"])
     if "content" in payload:
